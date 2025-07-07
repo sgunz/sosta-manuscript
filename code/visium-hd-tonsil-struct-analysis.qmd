@@ -1,0 +1,778 @@
+---
+title: "Visium HD tonsil - Struct Analysis"
+author: "Samuel Gunz"
+date:  last-modified
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+---
+
+# Libraries
+
+```{r}
+#| message: true
+#| warning: false
+
+library("VisiumIO")
+library("SpatialExperiment")
+library("ggspavis")
+library("SpotSweeper")
+library("scuttle")
+library("patchwork")
+library("scran")
+library("scater")
+library("scrapper")
+library("beachmat.hdf5")
+library("scater")
+library("dplyr")
+library("SingleR")
+library("celldex")
+library("HCATonsilData")
+library("readr")
+library("sosta")
+library("minerva")
+
+
+theme_set(theme_bw())
+set.seed(99)
+
+# fix error in SpatialExperiment; see https://support.bioconductor.org/p/9161859/
+setClassUnion("ExpData", c("matrix", "SummarizedExperiment"))
+```
+
+# Load data
+
+```{r}
+spe <- HDF5Array::loadHDF5SummarizedExperiment("../data/visium-hd-tonsil-processed")
+```
+
+## Annotation level
+
+```{r}
+ann <- read_csv("../outs/tonsil-visium-hd/sceTonsil_annotation_levels.csv")
+
+# Map annotation level 1 to the morde detailed
+map <- setNames(ann$annotation_level_1, ann$annotation_20230508)
+map2 <- setNames(ann$annotation_figure_1, ann$annotation_20230508)
+
+# Reassign
+spe$LabelLevel1 <- map[spe$BanksyAnnot]
+spe$LabelLevel1[is.na(spe$LabelLevel1)] <- "unknown"
+# Reassign
+spe$LabelFig1 <- map2[spe$BanksyAnnot]
+spe$LabelFig1[is.na(spe$LabelFig1)] <- "unknown"
+```
+
+
+```{r}
+data.frame(colData(spe), spatialCoords(spe)) |> 
+ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=PCAannot)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::kelly(7))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+
+data.frame(colData(spe), spatialCoords(spe)) |> 
+ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=LabelLevel1)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::kelly(15))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+
+data.frame(colData(spe), spatialCoords(spe)) |> 
+ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=LabelFig1)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::kelly(15))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+
+ggsave("../outs/figs/tonsil-annot.pdf", width = 10, height = 10)
+```
+
+
+```{r}
+data.frame(colData(spe), spatialCoords(spe)) |> 
+ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=BanksyAnnot)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::cols25(15))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+```
+
+
+# Reconstruct GCs
+
+```{r}
+n <- shapeIntensityImage(
+  spe,
+  marks = "LabelFig1",
+  imageCol = "sample_id",
+  imageId = "sample01",
+  markSelect = c("GCBC", "Activated NBC")
+)
+
+n
+```
+
+
+```{r}
+gcs <- reconstructShapeDensitySPE(spe, marks = "LabelFig1",
+                             imageCol = "sample_id",
+                             markSelect = c("GCBC", "Activated NBC"),
+                             thres = 3E-4)
+
+gcs <- sfheaders::sf_remove_holes(gcs)
+```
+
+
+```{r}
+data.frame(colData(spe), spatialCoords(spe)) |> 
+ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=LabelFig1)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::kelly(10))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8))) +
+        geom_sf(
+        data = gcs,
+        fill = NA,
+        color = "black",
+        inherit.aes = FALSE, # this is important
+        linewidth = 0.75
+    )
+```
+```{r}
+#| fig-width: 10
+#| fig-height: 10
+plotSpots(spe, annotate = "EGR3",
+          feature_names = "geneName",
+          assay_name = "logcounts",
+          y_reverse = FALSE) + 
+  geom_sf(data = gcs, fill = NA, color = "darkblue",
+          alpha = 0.5, inherit.aes = FALSE, linewidth = 0.5,
+          point_size = 0.01)
+```
+
+
+```{r}
+assign <- assingCellsToStructures(spe, gcs,
+    imageCol = "sample_id", nCores = 4
+)
+
+spe$gcAssign <- assign
+```
+
+```{r}
+cbind(colData(spe), spatialCoords(spe)) |>
+    as.data.frame() |>
+    ggplot(aes(x = pxl_col_in_fullres, y = pxl_row_in_fullres, color = gcAssign)) +
+    geom_point(size = 0.25) +
+    coord_equal()
+```
+# Shape metrics
+
+```{r}
+library("sf")
+res <- shapeMetrics(st_as_sfc(gcs))
+gcs <- cbind(gcs, res)
+```
+
+```{r}
+hist(log10(res$Area))
+```
+
+
+# Reference Axes
+
+```{r}
+rects <- st_minimum_rotated_rectangle(gcs)
+
+ggplot() + 
+  geom_sf(data = gcs, fill = NA, color = "darkblue",
+          alpha = 0.5, inherit.aes = FALSE, linewidth = 0.5) +
+      geom_sf(data = rects, fill = NA, color = "black",
+          alpha = 0.5, inherit.aes = FALSE, linewidth = 0.5)
+
+```
+
+# Reference from Mantel
+
+
+```{r}
+# NOTE: fails when NA in marks
+findCenterCoord <- function(spe, m, mark, targetMark) {
+  # select centroids that fit the target mark
+  sel <- spatialCoords(spe[,m])[colData(spe[,m])[[mark]] == targetMark,]
+  centers <- sel |> colMeans()
+
+  return(c(centers[1], centers[2]))
+}
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 15
+
+gcs_sel <- gcs[st_area(gcs) > 10^5,]
+
+plot(gcs_sel[,1])
+dfTxt <- st_centroid(gcs) |> st_geometry() |> st_coordinates() |> as.data.frame()
+dfTxt$structID <- gcs$structID
+
+ggplot() + 
+  geom_sf(data = gcs, fill = NA, color = "darkblue",
+          alpha = 0.5, inherit.aes = FALSE, linewidth = 0.5) +
+  geom_text(data = dfTxt, aes(x = X, y = Y, label = structID))
+```
+
+
+
+```{r}
+intersections <- sf::st_intersects(st_as_sf(
+    as.data.frame(spatialCoords(spe)),
+    coords = c("pxl_col_in_fullres", "pxl_row_in_fullres")
+), gcs_sel, sparse = FALSE)
+
+```
+
+```{r}
+GCBCcenter <- apply(intersections, 2, function(x) findCenterCoord(spe, x, "LabelFig1", "GCBC"))
+GCBCcenter <- t(GCBCcenter)
+colnames(GCBCcenter) <- c("x", "y")
+```
+
+
+
+```{r}
+intersectionsMZ <- sf::st_intersects(st_as_sf(
+    as.data.frame(spatialCoords(spe)),
+    coords = c("pxl_col_in_fullres", "pxl_row_in_fullres")
+), gcs_sel,
+sparse = FALSE)
+
+Mantelcenter <- apply(intersectionsMZ, 2, function(x) findCenterCoord(spe, x, "LabelFig1", "Activated NBC"))
+Mantelcenter <- t(Mantelcenter)
+colnames(Mantelcenter) <- c("x", "y")
+```
+
+
+
+```{r}
+ggplot()+
+  geom_sf(data = gcs_sel, fill = NA, color = "navy",
+          alpha = 0.5, inherit.aes = FALSE, linewidth = 1) +
+      guides(colour = guide_legend(override.aes = list(size= 1 , alpha = 1))) +
+  geom_point(data = GCBCcenter, aes(x = x, y = y), color = "yellow", size = 1) +
+  geom_point(data = Mantelcenter, aes(x = x, y = y), color = "orange", size = 1) +
+    theme_bw()
+```
+
+```{r}
+# a function to calculate gradients for all objects
+calculateLine <- function(coords, geom) {
+  
+  # fit a linear model
+  mod <- lm(y ~ x, coords)
+  
+  # predict new data
+  new_data <- data.frame(x = c(st_bbox(geom)$xmin, st_bbox(geom)$xmax))
+  ynew <- predict(mod, new_data)
+  
+  # create a new line
+  new_data$y <- ynew
+  newline <- st_linestring(as.matrix(new_data))
+  
+  return(newline)
+}
+```
+
+```{r}
+# Use apply to claculate line segment for all geoms
+# Initialize an empty sf object
+lines <- c()
+
+for (i in 1:nrow(gcs_sel)) {
+  coords <- rbind(Mantelcenter[i,], GCBCcenter[i,]) |> as.data.frame()
+  line <- calculateLine(coords, gcs_sel[i,])
+  lines <- c(lines, st_sfc(st_intersection(line, gcs_sel[i,])))
+}
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 10
+
+df <- cbind(colData(spe), spatialCoords(spe))
+
+df <- df |> 
+    as.data.frame() |> 
+    mutate(LabelFig1New = case_when(LabelFig1 == "GCBC" ~ "GCBC",
+                                    LabelFig1 == "Activated NBC" ~ "Activated NBC",
+                                    LabelFig1 == "NBC" ~ "NBC",
+                                    LabelFig1 == "epithelial" ~ "epithelial",
+                                    .default = "other"))
+
+p1 <- ggplot() +
+    geom_point(
+        aes(pxl_col_in_fullres, pxl_row_in_fullres, col = LabelFig1New),
+        shape = 16,
+        stroke = 0,
+        size = 0.75,
+        data = df
+    ) +
+    scale_color_manual(values = c("dodgerblue3", "plum3", "gold", "skyblue3", "slategray2")) +
+    guides(colour = guide_legend(override.aes = list(size = 1 , alpha = 2))) +
+    geom_sf(data = st_sfc(lines),
+            color = "gray95",
+            linewidth = 1.25) +
+        geom_sf(
+        data = gcs_sel,
+        fill = NA,
+        color = "black",
+        alpha = 0.5,
+        inherit.aes = FALSE,
+        linewidth = 1.25
+    ) +
+    geom_point(data = GCBCcenter,
+               aes(x = x, y = y),
+               color = "orangered2",
+               shape = 15,
+               size = 2.5) +
+    geom_point(data = Mantelcenter,
+               aes(x = x, y = y),
+               color = "mediumpurple2",
+               shape = 15,
+               size = 2.5) +
+    theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8))) +
+    labs(color = "")
+
+p1
+
+ggsave("../outs/figs/tonsil-axes.pdf", width = 10, height = 10)
+```
+```{r}
+Mantels_sf <- st_as_sf(as.data.frame(Mantelcenter), coords = c("x", "y"))
+
+anchors <- c()
+
+for (i in 1:nrow(gcs_sel)) {
+  anchors <- c(anchors, 
+               st_cast(st_sfc(lines)[i,], "POINT")[
+                   st_distance(st_cast(st_sfc(lines)[i,], "POINT"),
+                               Mantels_sf[i,]) %>% which.min()])
+}
+```
+```{r}
+ggplot() +
+    geom_sf(
+        data = gcs_sel,
+        fill = NA,
+        color = "navy",
+        alpha = 0.5,
+        inherit.aes = FALSE,
+        linewidth = 1
+    ) +
+    guides(colour = guide_legend(override.aes = list(size = 1 , alpha = 1))) +
+    geom_sf(data = st_sfc(lines),
+            color = "purple3",
+            linewidth = 1) +
+    geom_point(data = GCBCcenter,
+               aes(x = x, y = y),
+               color = "yellow",
+               size = 1) +
+    geom_point(data = Mantelcenter,
+               aes(x = x, y = y),
+               color = "orange",
+               size = 1) +
+    geom_sf(data = st_sfc(anchors),
+            color = "red2",
+            linewidth = 1) +
+    theme_bw()
+```
+
+
+```{r}
+
+st_perpendicular_line <- function(endpoint, line){
+    # Define endpoints
+    endpoint <- st_coordinates(endpoint)
+    
+    # Extract coordinates
+    coords <- st_coordinates(line)
+
+    # Calculate perpendicular direction
+    dx <- coords[2, 1] - coords[1, 1] # Change in x
+    dy <- coords[2, 2] - coords[1, 2] # Change in y
+    
+    # Perpendicular vector
+    perp_dx <- -dy
+    perp_dy <- dx
+    
+    # New line perpendicular from endpoint
+    new_coords <- matrix(c(endpoint[1] + 0.5 * perp_dx, endpoint[2] + 0.5 * perp_dy,
+                           endpoint[1] - 0.5 * perp_dx, endpoint[2] - 0.5 * perp_dy), 
+                         ncol = 2, byrow = TRUE)
+    
+    return(st_linestring(new_coords))
+}
+
+
+new_lines <- c()
+
+for (i in 1:nrow(gcs_sel)) {
+    new_lines <- c(new_lines, st_sfc(st_perpendicular_line(st_sfc(anchors)[i,], st_sfc(lines)[i,])))
+
+}
+
+new_lines <- st_sfc(new_lines)
+```
+
+```{r}
+ggplot() +
+    geom_sf(
+        data = gcs_sel,
+        fill = NA,
+        color = "navy",
+        alpha = 0.5,
+        inherit.aes = FALSE,
+        linewidth = 1
+    ) +
+    guides(colour = guide_legend(override.aes = list(size = 1 , alpha = 1))) +
+    geom_sf(data = st_sfc(lines),
+            color = "purple3",
+            linewidth = 1) +
+    geom_point(data = GCBCcenter,
+               aes(x = x, y = y),
+               color = "yellow",
+               size = 1) +
+    geom_point(data = Mantelcenter,
+               aes(x = x, y = y),
+               color = "orange",
+               size = 1) +
+    geom_sf(data = st_sfc(anchors),
+            color = "red2",
+            linewidth = 1) +
+  geom_sf(data = new_lines, color = "seagreen", linewidth = 1)
+```
+
+## Calculate distances
+
+```{r}
+colData(spe)$mantel_anchor_dist <- NA
+colData(spe)$mantel_anchor_dist_norm <- NA
+
+for (i in 1:nrow(gcs_sel)) {
+    log1 <- st_intersects(st_as_sf(as.data.frame(spatialCoords(spe)),
+                           coords = c("pxl_col_in_fullres",
+                                      "pxl_row_in_fullres")), gcs_sel[i,], sparse = FALSE)
+    
+    dist1 <- st_distance(st_as_sf(as.data.frame(spatialCoords(spe[,log1])),
+                           coords = c("pxl_col_in_fullres",
+                                      "pxl_row_in_fullres")),  new_lines[[i]])
+    
+    colData(spe[,log1])$mantel_anchor_dist <- dist1
+    colData(spe[,log1])$mantel_anchor_dist_norm <- dist1 / max(dist1)
+}
+```
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 8
+df <- cbind(colData(spe), spatialCoords(spe))
+
+df <- df |> 
+    as.data.frame() |> 
+    mutate(LabelFig1New = case_when(LabelFig1 == "GCBC" ~ "GCBC",
+                                    LabelFig1 == "Activated NBC" ~ "Activated NBC",
+                                    LabelFig1 == "NBC" ~ "NBC",
+                                    LabelFig1 == "epithelial" ~ "epithelial",
+                                    .default = "other")) |> 
+    filter(!is.na(mantel_anchor_dist_norm)) |> 
+    mutate(mantel_anchor_dist_norm = as.numeric(mantel_anchor_dist_norm))
+
+ggplot() +
+  geom_point(
+    aes(pxl_col_in_fullres, pxl_row_in_fullres, color = mantel_anchor_dist_norm),
+    shape = 16,
+    stroke = 0,
+    size = 0.9,
+    data = df
+  ) +
+  scale_color_gradient(low = "gray99", high = "blue3") +
+  geom_sf(
+    data = gcs_sel,
+    fill = NA,
+    color = "navy",
+    alpha = 0.5,
+    inherit.aes = FALSE,
+    linewidth = 1
+  ) +
+  geom_sf(data = st_sfc(lines),
+          color = "gold",
+          linewidth = 1) +
+  geom_sf(data = new_lines,
+          color = "seagreen",
+          linewidth = 1) +
+  theme_void() +
+  labs(color = "norm.\ndistance")
+
+
+ggsave("../outs/figs/tonsil-axes-dist.pdf", width = 10, height = 10)
+```
+
+# Pseudobulk / aggregate counts
+
+```{r}
+spe$binned_dist <- as.factor(cut(spe$mantel_anchor_dist_norm, breaks = 30))
+
+spe_sel <- spe[,!is.na(spe$binned_dist)]
+
+lev <- combineFactors(spe_sel$binned_dist, keep.unused = FALSE)
+
+spe_agg <- scrapper::aggregateAcrossCells(
+  logcounts(spe_sel),
+  list(bins = spe_sel$binned_dist),
+  num.threads = 1
+)
+
+saveRDS(spe_agg, "../data/spe_agg_binned_dist.rds")
+```
+
+
+
+```{r}
+aggMat <- spe_agg$sums[rowSums(spe_agg$sums) > 0,]
+
+sum(rowSums(aggMat) == 0)
+
+res_MIC <- apply(aggMat, 1, function(x)
+    mine(x,c(1:ncol(aggMat)))$MIC)
+
+res_MAS <- apply(aggMat, 1, function(x)
+    mine(x,c(1:ncol(aggMat)))$MAS)
+```
+
+
+```{r}
+mine(aggMat["ENSG00000188976",], c(1:ncol(aggMat)))
+```
+
+
+```{r}
+plot(c(1:ncol(aggMat)), aggMat["ENSG00000188976",])
+```
+
+
+```{r}
+genes_interest_MIC <- res_MIC[order(res_MIC, decreasing = TRUE)] %>% names()
+genes_interest_MAS <- res_MAS[order(res_MAS, decreasing = TRUE)] %>% names()
+```
+
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+pheatmap::pheatmap(aggMat[genes_interest_MIC[1:100],],
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   show_rownames = FALSE,
+                   scale = "row")
+```
+
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+pheatmap::pheatmap(aggMat[genes_interest_MAS,],
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+```
+# Correlation
+
+```{r}
+#|warning: false
+
+res_corr <- apply(aggMat, 1, function(x)
+    cor.test(x,c(1:ncol(aggMat)), method = "spearman")$estimate)
+```
+
+
+```{r}
+genes_interest_cor <- res_corr[order(abs(res_corr), decreasing = TRUE)] %>% names()
+```
+
+```{r}
+genes_cor <- rowData(spe)[genes_interest_cor, "geneName"] |> unlist()
+```
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+
+m <- aggMat[genes_interest_cor[1:20],]
+rownames(m) <- rowData(spe)[genes_interest_cor[1:20], "geneName"]
+
+pheatmap::pheatmap(m,
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+```
+
+
+```{r}
+library("readxl")
+
+markers <- read_excel("../data/1-s2.0-S0006497120464055-mmc2.xlsx", sheet = 3, skip = 5)
+
+lz_markers <- markers[markers$`FC human*` > 0, ]$`Official Gene Symbol`
+dz_markers <- markers[markers$`FC human*` < 0, ]$`Official Gene Symbol`
+```
+
+
+```{r}
+length(c(lz_markers, dz_markers))
+
+rowData(spe)[genes_interest_cor[1:100], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
+rowData(spe)[genes_interest_MIC[1:100], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
+rowData(spe)[genes_interest_MAS[1:100], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
+
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+
+lz_sel <- rownames(rowData(spe)[rowData(spe)$geneName %in% c(lz_markers),])
+
+pheatmap::pheatmap(aggMat[lz_sel,],
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+
+dz_sel <- rownames(rowData(spe)[rowData(spe)$geneName %in% c(dz_markers),])
+
+pheatmap::pheatmap(aggMat[dz_sel,],
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+```
+
+# Select one GC
+
+
+```{r}
+spe_sel <- spe[,!is.na(spe$binned_dist)]
+
+spe_sel_22 <- spe_sel[, spe_sel$gcAssign == "sample01_22"]
+```
+
+
+```{r}
+spe_agg_sel22 <- scrapper::aggregateAcrossCells(
+  logcounts(spe_sel_22),
+  list(bins = spe_sel_22$binned_dist),
+  num.threads = 1
+)
+```
+
+
+```{r}
+aggMat22 <- spe_agg_sel22$sums[rowSums(spe_agg_sel22$sums) > 0,]
+
+res_MIC22 <- apply(aggMat22, 1, function(x)
+    mine(x,c(1:ncol(aggMat22)))$MIC)
+
+res_MAS22 <- apply(aggMat22, 1, function(x)
+    mine(x,c(1:ncol(aggMat22)))$MAS)
+```
+
+
+
+```{r}
+genes_interest_MIC22 <- res_MIC22[order(res_MIC22, decreasing = TRUE)] %>% names()
+genes_interest_MAS22 <- res_MAS22[order(res_MAS22, decreasing = TRUE)] %>% names()
+```
+
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+
+m <- aggMat22[genes_interest_MIC22[1:20],]
+rownames(m) <- rowData(spe)[genes_interest_MIC22[1:20], "geneName"]
+
+colnames(m) <- round(seq(from = 0, to = 1, length.out = 30),2)
+
+ph <- pheatmap::pheatmap(m,
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   treeheight_row = 0,
+                   scale = "row")
+
+ggsave("../outs/figs/tonsil-axes-mic-22.pdf", ph, width = 6, height = 4)
+```
+
+# Correlation
+
+```{r}
+#|warning: false
+
+res_corr22 <- apply(aggMat22, 1, function(x)
+    cor.test(x,c(1:ncol(aggMat22)), method = "spearman")$estimate)
+```
+
+
+```{r}
+genes_interest_cor22 <- res_corr22[order(abs(res_corr22), decreasing = TRUE)] %>% names()
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+
+m <- aggMat22[genes_interest_cor22[1:20],]
+rownames(m) <- rowData(spe)[genes_interest_cor22[1:20], "geneName"]
+
+pheatmap::pheatmap(m,
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+```
+
+```{r}
+length(c(lz_markers, dz_markers))
+
+rowData(spe)[genes_interest_cor22[1:25], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
+rowData(spe)[genes_interest_MIC22[1:25], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
+rowData(spe)[genes_interest_MAS22[1:10], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
+
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+
+lz_sel <- rownames(rowData(spe)[rowData(spe)$geneName %in% c(lz_markers),])
+
+pheatmap::pheatmap(aggMat22[lz_sel,],
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+
+dz_sel <- rownames(rowData(spe)[rowData(spe)$geneName %in% c(dz_markers),])
+
+pheatmap::pheatmap(aggMat22[dz_sel,],
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+```
+

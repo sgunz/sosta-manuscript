@@ -1,0 +1,505 @@
+---
+title: "Reconstruction and quantification of pancreatic islets from IMC data"
+author: "Samuel Gunz"
+date:  last-modified
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+---
+
+
+```{r}
+#| message: false
+#| warning: false
+
+library("sosta")
+library("ggplot2")
+library("dplyr")
+library("tidyr")
+library("SpatialExperiment")
+library("ExperimentHub")
+library("lme4")
+library("lmerTest")
+library("ggfortify")
+library("dplyr")
+
+
+set.seed(8048)
+```
+
+
+Note: part of this code overlaps the `r BiocStyle::Biocpkg('sosta')` vignette "2. Reconstruction and analysis of pancreatic islets from IMC data" and the OSTA chapter "Structure-based analysis" (https://lmweber.org/OSTA/pages/mult-structure-based.html).
+
+### Dataset
+
+```{r, load-data-structs}
+#| message: false
+# load experiment hub
+eh <- ExperimentHub()
+oid <- names(eh[eh$title == "Damond_2019_Pancreas - sce - v1 - full"])
+
+
+# Load single cell experiment object
+spe <- eh[[oid]]
+# Convert to spatial experiment object
+spe <- toSpatialExperiment(spe,
+                           sample_id = "image_name",
+                           spatialCoordsNames = c("cell_x", "cell_y"))
+# Remove as not needed
+assays(spe) <- list()
+```
+
+
+```{r, plot-data}
+selPl <- sample(unique(spe$image_name), 4)
+df <- cbind(colData(spe[, spe$image_name %in% selPl]),
+            spatialCoords(spe[, spe$image_name %in% selPl]))
+df |>
+  as.data.frame() |>
+  ggplot(aes(x = cell_x, y = cell_y, color = cell_category)) +
+  geom_point(size = 0.5) +
+  facet_wrap( ~ image_name, ncol = 2) +
+  coord_equal() +
+  theme_classic() +
+  scale_color_manual(values=unname(pals::cols25(n = 5)))
+```
+
+### Islet reconstrution
+
+```{r, estimate-params}
+n <- estimateReconstructionParametersSPE(
+    spe,
+    marks = "cell_category",
+    imageCol = "image_name",
+    markSelect = "islet",
+    nImages = 25,
+    nCores = 8
+)
+
+thresSPE <- mean(n$thres)
+bndwSPE <- mean(n$bndw)
+```
+
+```{r}
+start <- Sys.time()
+# Run on all images
+allIslets <- reconstructShapeDensitySPE(
+    spe,
+    marks = "cell_category",
+    imageCol = "image_name",
+    markSelect = "islet",
+    bndw = bndwSPE,
+    thres = thresSPE,
+    nCores = 8
+)
+print(Sys.time() - start)
+```
+
+Let's inspect the reconstruction in the sample images.
+ 
+```{r}
+df <- cbind(colData(spe[, spe$image_name %in% selPl]),
+            spatialCoords(spe[, spe$image_name %in% selPl]))
+df |>
+  as.data.frame() |>
+  ggplot(aes(x = cell_x, y = cell_y, color = cell_category)) +
+  geom_point(size = 0.25) +
+  facet_wrap(~ image_name, ncol = 2) +
+  coord_equal() +
+  theme_classic() +
+  scale_color_manual(values=unname(pals::cols25(n = 5))) +
+  geom_sf(
+    data = allIslets[allIslets$image_name %in% selPl, ],
+    inherit.aes = FALSE,
+    color = "black",
+    linetype = "11",
+    fill = NA,
+    linewidth = 0.75
+  ) 
+```
+
+
+```{r}
+colsKeep <- c(
+  "patient_stage",
+  "tissue_slide",
+  "tissue_region",
+  "patient_id",
+  "patient_disease_duration",
+  "patient_age",
+  "patient_gender",
+  "sample_id"
+)
+
+# specify factor levels
+lv <- c("Non-diabetic", "Onset", "Long-duration")
+
+patientData <- colData(spe) |>
+  as_tibble() |>
+  group_by(image_name) |>
+  select(all_of(colsKeep)) |>
+  mutate(patient_stage = factor(patient_stage, levels = lv)) |>
+  unique()
+
+allIslets <- allIslets |>
+  dplyr::left_join(patientData, by = "image_name")
+```
+
+
+### Quantification of geometric features
+
+```{r}
+isletMetrics <- totalShapeMetrics(allIslets)
+allIslets <- allIslets |>
+  cbind(t(isletMetrics))
+```
+
+```{r}
+autoplot(
+  prcomp(t(isletMetrics), scale. = TRUE),
+  x = 1,
+  y = 2,
+  data = allIslets,
+  color = "patient_stage",
+  size = 2,
+  # shape = 'type',
+  loadings = TRUE,
+  loadings.colour = "steelblue3",
+  loadings.label = TRUE,
+  loadings.label.size = 3,
+  loadings.label.repel = TRUE,
+  loadings.label.colour = "black"
+) +
+  theme_bw() +
+  coord_fixed() +
+  scale_color_manual(values = unname(pals::tol(n = 3)))
+```
+```{r, fig.width=8, fig.height=6}
+allIslets |>
+  sf::st_drop_geometry() |>
+  select(patient_stage, rownames(isletMetrics)) |>
+  pivot_longer(-patient_stage) |>
+  filter(name %in% c("Area", "Compactness", "Curl")) |>
+  ggplot(aes(x = patient_stage, y = value, fill = patient_stage)) +
+  geom_violin() +
+  geom_boxplot(aes(fill = NULL), width = 0.3) +
+  facet_wrap( ~ name, scales = "free") +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  guides(fill = "none") +
+  theme_bw() +
+  scale_fill_manual(values = unname(pals::tol(n = 3)))
+```
+```{r, fig.width=8, fig.height=6}
+allIslets |>
+  sf::st_drop_geometry() |>
+  select(patient_stage, patient_id,  rownames(isletMetrics)) |>
+  pivot_longer(-c(patient_stage, patient_id)) |>
+  filter(name %in% c("Area")) |>
+  ggplot(aes(x = as.factor(patient_id), y = value, fill = patient_stage)) +
+  geom_violin() +
+  geom_boxplot(aes(fill = NULL), width = 0.3) +
+  facet_wrap( ~ patient_stage, scales = "free") +
+  scale_y_log10() +
+  #scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  guides(fill = "none") +
+  theme_bw() +
+  scale_fill_manual(values = unname(pals::tol(n = 3)))
+```
+
+## Quantification of structure level features
+
+```{r}
+assign <- assingCellsToStructures(spe, allIslets,
+    imageCol = "image_name", nCores = 8
+)
+spe$structAssign <- assign
+```
+
+```{r}
+props <- cellTypeProportions(spe, "structAssign", "cell_type")
+
+colnames(props) <- paste0("prop_", colnames(props))
+props$structID <- rownames(props)
+
+allIslets <- left_join(allIslets, props, by = "structID")
+```
+
+
+```{r}
+spe$minDist <- minBoundaryDistances(
+    spe = spe, imageCol = "image_name",
+    structColumn = "structAssign", allStructs = allIslets,
+    nCores = 8
+)
+```
+```{r}
+library("parallel")
+library("dplyr")
+library("sf")
+
+minCellTypeStructDist <- function(spe, allStructs, structID = "structID",
+                                        cellTypeColumn, imageCol, nCores = 1) {
+    # Input checks
+    stopifnot(
+        "'spe' must be a SpatialExperiment object" = inherits(spe, "SpatialExperiment"),
+        "'allStructs' must be an sf object" = inherits(allStructs, "sf"),
+        "'structID' must be a single character string and in allStructs" =
+            is.character(structID) && length(structID) == 1 && structID %in% colnames(allStructs),
+        "'cellTypeColumn' must exist in colData(spe)" =
+            cellTypeColumn %in% colnames(colData(spe)),
+        "'imageCol' must exist in colData(spe) and allStructs" =
+            imageCol %in% colnames(colData(spe)) && imageCol %in% colnames(allStructs)
+    )
+
+    # Extract unique image names and remove NAs
+    images <- unique(spe[[imageCol]])
+    images <- images[!is.na(images)]
+
+    # Convert spe to data frame with spatial coords + metadata
+    df <- .SPE2df(spe, imageCol, marks = cellTypeColumn)
+
+    # Split by image
+    ls <- split(df, as.factor(df[[imageCol]]))
+
+    # Parallel processing
+    res <- mclapply(ls, function(dfSel) {
+        selImage <- unique(dfSel[[imageCol]])
+        subStruct <- allStructs[allStructs[[imageCol]] %in% selImage, ]
+
+        if (nrow(subStruct) == 0) {
+            return(NULL)
+        }
+
+        spatialCoordsSf <- st_as_sf(dfSel[, c(1, 2)],
+                                    coords = c(colnames(dfSel)[1], colnames(dfSel)[2])
+        )
+
+        dist <- st_distance(spatialCoordsSf, st_boundary(subStruct))
+        colnames(dist) <- st_drop_geometry(subStruct)[, structID]
+
+        # dfSel[, 4] is assumed to be cellTypeColumn
+        resDist <- aggregate(dist ~ dfSel[, 4], FUN = min)
+        colnames(resDist)[1] <- cellTypeColumn
+
+        return(resDist)
+    }, mc.cores = nCores)
+
+    # Combine to one df, NA when cell type no present in one sample
+    resDf <- Reduce(function(x, y) full_join(x, y, by = cellTypeColumn), res)
+    # Change orientation of resDf
+    rownames(resDf) <- resDf[[cellTypeColumn]]
+    return(as.data.frame(t(resDf[,-1])))
+}
+```
+
+```{r}
+mdstr <- minCellTypeStructDist(spe = spe, imageCol = "image_name",
+                               cellTypeColumn =  "cell_type",
+                               allStructs = allIslets, nCores = 4)
+
+colnames(mdstr) <- paste0("dist_", colnames(mdstr))
+mdstr$structID <- rownames(mdstr)
+
+allIslets <- left_join(allIslets, mdstr, by = "structID")
+```
+
+
+
+```{r}
+library(vegan)
+
+structColumn <- "structAssign"
+cellTypeColumn <- "cell_type"
+nCores <- 3
+
+
+df <- colData(spe)[, c(structColumn, cellTypeColumn)]
+df <- df[!is.na(df[[structColumn]]), ]
+
+# Split data frame
+ls <- split(df, as.factor(df[, 1]))
+
+# Compute the proportion of each cell type within each structure
+res <- mclapply(ls, function(dfSub) {
+    # Compute the frequency and normalize
+    idx <- diversity(table(dfSub[[cellTypeColumn]]), index = "shannon")
+    return(idx)
+}, mc.cores = nCores)
+
+# Combine into single df and name with structs id
+resComb <- do.call(rbind, res) |> as.data.frame()
+
+colnames(resComb) <- "shannonDiv"
+```
+
+```{r}
+resComb$structID <- rownames(resComb)
+
+allIslets <- left_join(allIslets, resComb, by = "structID")
+```
+
+# Boders
+
+```{r}
+borders <- mclapply(
+    st_geometry(allIslets),
+    \(x) st_difference(st_buffer(x, 15), st_buffer(x, -15)),
+    mc.cores = nCores
+) |>
+    st_as_sfc() |>
+    st_as_sf() # both functions needed for proper conversion
+
+borders$image_name <- allIslets$image_name
+
+```
+
+```{r}
+df <- cbind(colData(spe[, spe$image_name %in% selPl]),
+            spatialCoords(spe[, spe$image_name %in% selPl]))
+df |>
+  as.data.frame() |>
+  ggplot(aes(x = cell_x, y = cell_y, color = cell_category)) +
+  geom_point(size = 0.25) +
+  facet_wrap(~ image_name, ncol = 2) +
+  coord_equal() +
+  theme_classic() +
+  scale_color_manual(values=unname(pals::cols25(n = 5))) +
+  geom_sf(
+    data = borders[borders$image_name %in% selPl, ],
+    inherit.aes = FALSE,
+    color = "gray25",
+    fill = NA,
+    linewidth = 0.75,
+    linetype = "11"
+  ) 
+```
+
+
+```{r}
+borders$image_name <- allIslets$image_name
+borders$borderID <- paste0("border_", allIslets$structID)
+allIslets$borderID <- borders$borderID
+
+
+spe$IsletBorder <- assingCellsToStructures(spe,
+    borders,
+    imageCol = "image_name",
+    uniqueId = "borderID",
+    nCores = 4
+)
+```
+
+```{r}
+structColumn <- "IsletBorder"
+cellTypeColumn <- "cell_type"
+nCores <- 3
+
+
+df <- colData(spe)[, c(structColumn, cellTypeColumn)]
+df <- df[!is.na(df[[structColumn]]), ]
+
+# Split data frame
+ls <- split(df, as.factor(df[, 1]))
+
+# Compute the proportion of each cell type within each structure
+res <- mclapply(ls, function(dfSub) {
+    # Compute the frequency and normalize
+    idx <- diversity(table(dfSub[[cellTypeColumn]]), index = "shannon")
+    return(idx)
+}, mc.cores = nCores)
+
+# Combine into single df and name with structs id
+resComb <- do.call(rbind, res) |> as.data.frame()
+
+colnames(resComb) <- "shannonDivBorder"
+resComb$borderID <- rownames(resComb)
+
+allIslets <- left_join(allIslets, resComb, by = "borderID")
+
+```
+
+
+# Save spe object
+
+
+```{r}
+saveRDS(allIslets, "../../data/allIslets.rds" )
+saveRDS(spe, "../../data/spe_islets_sosta.rds" )
+```
+
+
+```{r}
+sessionInfo()
+```
+
+<!-- ### Between sample comparison using mixed effects models -->
+
+<!-- ## 4th root transform -->
+
+<!-- ```{r} -->
+<!-- hist(allIslets$Area^(1/4)) -->
+<!-- mod <- lmer(Area^(1/4) ~ patient_stage + (1 | patient_id) + (1 | image_name), data = allIslets) -->
+<!-- ``` -->
+
+<!-- #### Model diagnositcs -->
+
+<!-- ::: {.panel-tabset} -->
+
+<!-- ## Residuals vs. fitted  -->
+
+<!-- ```{r} -->
+<!-- plot( -->
+<!--   mod, -->
+<!--   resid(., scaled = TRUE) ~ fitted(.), -->
+<!--   col = allIslets$patient_id, -->
+<!--   pch = 12, -->
+<!--   abline = 0, -->
+<!--   xlab = "Fitted values", -->
+<!--   ylab = "Standardised residuals" -->
+<!-- ) -->
+<!-- ``` -->
+
+<!-- ## Residuals vs. fitted per sample -->
+
+<!-- ```{r} -->
+<!-- plot( -->
+<!--   mod, -->
+<!--   resid(., scaled = TRUE) ~ fitted(.) | patient_id, -->
+<!--   abline = 0, -->
+<!--   pch = 12, -->
+<!--   xlab = "Fitted values", -->
+<!--   ylab = "Standardised residuals" -->
+<!-- ) -->
+<!-- ``` -->
+
+<!-- ## QQ Plot -->
+
+<!-- ```{r} -->
+<!-- qqnorm(resid(mod), pch = 16) -->
+<!-- qqline(resid(mod)) -->
+<!-- ``` -->
+
+<!-- ## Leverage plot -->
+
+<!-- ```{r} -->
+<!-- #Calculate leverage -->
+<!-- lev <- hat(model.matrix(mod)) -->
+<!-- #Plot leverage against standardized residuals -->
+<!-- plot( -->
+<!--   resid(mod, type = "pearson") ~ lev, -->
+<!--   las = 1, -->
+<!--   ylab = "Standardized residuals", -->
+<!--   xlab = "Leverage" -->
+<!-- ) -->
+<!-- ``` -->
+<!-- ::: -->
+
+<!-- ```{r} -->
+<!-- summary(mod) -->
+<!-- ``` -->
+
+
+<!-- As we can see from `summary(mod)` there is no significant difference in islet area of long-duration patients with respect to non-diabetic patients when accounting for correlation on the patient and image level. -->

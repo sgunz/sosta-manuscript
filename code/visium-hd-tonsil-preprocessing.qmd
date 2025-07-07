@@ -1,0 +1,211 @@
+---
+title: "Visium HD tonsil - Preprocessing"
+author: "Samuel Gunz"
+date:  last-modified
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+output-dir: "../docs/"
+---
+
+
+```{r}
+library("VisiumIO")
+library("SpatialExperiment")
+library("ggspavis")
+library("SpotSweeper")
+library("scuttle")
+library("patchwork")
+library("scran")
+library("scater")
+library("scrapper")
+library("beachmat.hdf5")
+library("scater")
+set.seed(99)
+
+# fix error in SpatialExperiment; see https://support.bioconductor.org/p/9161859/
+setClassUnion("ExpData", c("matrix", "SummarizedExperiment"))
+```
+
+
+```{r}
+# read `6um bins into 'SpatialExperiment'
+td <- "~/data_no_backup/visium-hd-tonsil/"
+
+vhd16 <- TENxVisiumHD(
+    spacerangerOut = td,
+    processing="filtered",
+    format="h5", 
+    bin_size="016") |>
+    import()
+```
+
+```{r}
+#| eval: false
+#| include: false
+vhd16 <- vhd16[c(1:500), c(1:500)]
+```
+
+```{r}
+vhd16$libsize <- colSums(counts(vhd16))
+```
+
+
+```{r}
+#| column: screen
+#| out-width: 100%
+#| fig-width: 20
+#| fig-heigth: 15 
+plotVisium(vhd16, annotate="libsize",
+           show_axes = TRUE, point_size = 0.5) + 
+    facet_null() + ggtitle("16 µm - original")
+```
+
+# Quality control with spot sweeper
+
+```{r}
+# calculate per-cell QC metrics
+mt <- grepl("^MT-", rownames(vhd16))
+vhd16 <- addPerCellQCMetrics(vhd16, subsets=list(mt=mt))
+# determine outliers based on 
+# - low log-library size
+# - few uniquely detected features
+# - high mitochondrial count fraction
+vhd16 <- localOutliers(vhd16, metric="sum", direction="lower", log=TRUE)
+vhd16 <- localOutliers(vhd16, metric="detected", direction="lower", log=TRUE)
+vhd16 <- localOutliers(vhd16, metric="subsets_mt_percent", direction="higher", log=TRUE)
+vhd16$discard <- 
+    vhd16$sum_outliers | 
+    vhd16$detected_outliers | 
+    vhd16$subsets_mt_percent_outliers
+# tabulate number of bins retained 
+# vs. removed by any criterion 
+table(vhd16$discard)
+```
+
+```{r}
+plotSpots(vhd16, annotate="sum_outliers") + ggtitle("low_lib_size") +
+plotSpots(vhd16, annotate="detected_outliers") + ggtitle("low_n_features") +
+plotSpots(vhd16, annotate="discard") + ggtitle("discard") +
+plot_layout(nrow=1, guides="collect") & theme(
+    plot.title=element_text(hjust=0.2),
+    legend.key.size=unit(0, "lines")) &
+    guides(col=guide_legend(override.aes=list(size=2))) & 
+    scale_color_manual("discard", values=c("lavender", "navy"))
+```
+
+```{r}
+plotSpots(vhd16, annotate="discard", point_size = 0.25) + 
+    facet_null() + ggtitle("8 µm - original") +
+    scale_color_manual("discard", values=c("lavender", "navy"))
+```
+### Save raw data
+
+```{r}
+HDF5Array::saveHDF5SummarizedExperiment(vhd16, "../data/visium-hd-tonsil-raw-2")
+```
+
+# Standart pipeline
+
+## Subset data
+
+```{r}
+vhd16 <- vhd16[, !vhd16$discard]
+dim(vhd16)
+
+# non positive counts
+vhd16 <- vhd16[, colSums(counts(vhd16)) > 0]
+```
+
+```{r}
+# number of threads
+nthreads <- 8
+
+# select gene expression matrix
+mat <- assay(vhd16, "counts")
+
+# log normalization
+sf <- centerSizeFactors(colSums(mat))
+lmat <- normalizeCounts(mat, size.factors=pmax(0.001, sf)) 
+res <- modelGeneVariances(lmat)
+
+rowData(vhd16) <- res$statistics
+assay(vhd16, "logcounts") <- lmat
+```
+
+## Highly variable genes
+
+```{r}
+top.hvgs <- chooseHighlyVariableGenes(res$statistics$residuals)
+# include hvgs in row data
+rowData(vhd16)["isHvg"] <- FALSE
+rowData(vhd16)[top.hvgs, "isHvg"] <- TRUE 
+```
+
+## Run PCA on HVGs
+
+```{r}
+#| eval: false
+#| include: false
+pca <- runPca(lmat[top.hvgs,], num.threads=nthreads)
+reducedDim(vhd16, "pca") <- t(pca$components)
+
+colnames(reducedDim(vhd16, "pca")) <- 
+    paste0("PC", c(1:dim(reducedDim(vhd16, "pca"))[2]))
+```
+
+```{r}
+library("BiocParallel")
+multicoreParam <- MulticoreParam(workers = 6)
+
+vhd16 <- scater::runPCA(vhd16, subset_row = unlist(rowData(vhd16)["isHvg"]),
+                      ncomponents=20, BPPARAM=multicoreParam)
+```
+
+
+### Visualize PCs
+
+```{r}
+# Code adapted from: https://lmweber.org/OSTA/pages/crs-dimension-reduction.html#exploratory
+df <- data.frame(colData(vhd16), reducedDim(vhd16, "PCA"), spatialCoords(vhd16))
+lapply(paste0("PC", seq(3)), \(.) {
+    fd <- df[order(abs(df[[.]])), ]
+    ggplot(fd, aes(pxl_col_in_fullres, pxl_row_in_fullres, col=.data[[.]]))
+}) |>
+    wrap_plots(nrow=1) &
+    geom_point(shape=16, stroke=0, size=0.2) &
+    scale_color_gradientn(colors=pals::jet()) &
+    coord_equal() & theme_void() & theme(
+        legend.position="bottom",
+        legend.key.width=unit(0.8, "lines"),
+        legend.key.height=unit(0.4, "lines"))
+```
+
+```{r}
+pcs <- reducedDim(t, "PCA")[, seq(3)]
+pcs <- sweep(pcs, 2, colMins(pcs), `-`)
+pcs <- sweep(pcs, 2, colMaxs(pcs), `/`)
+rgb <- apply(pcs, 1, \(.) rgb(.[1], .[2], .[3]))
+df <- data.frame(colData(t), rgb, spatialCoords(t))
+
+
+ggplot(df, aes(pxl_col_in_fullres, pxl_row_in_fullres, col=rgb)) +
+    geom_point(shape=16, stroke=0, size=0.4) +
+    scale_color_identity() + coord_equal() + theme_void()
+```
+
+```{r}
+csv <- list.files(td, "clustering", recursive=TRUE, full.names=TRUE)
+dfs <- lapply(csv, read.csv, row.names="barcode") 
+
+colData(vhd8)$cluster <- factor(dfs[[1]][colnames(vhd8), "cluster"])
+colData(vhd16)$cluster <- factor(dfs[[2]][colnames(vhd16), "cluster"])
+```
+
+
+```{r}
+HDF5Array::saveHDF5SummarizedExperiment(vhd16, "../data/visium-hd-tonsil-processed")
+```

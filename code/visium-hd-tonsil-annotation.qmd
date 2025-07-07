@@ -1,0 +1,250 @@
+---
+title: "Visium HD tonsil - Annotation"
+author: "Samuel Gunz"
+date:  last-modified
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+---
+
+# Libraries
+
+```{r}
+#| message: true
+#| warning: false
+
+library("VisiumIO")
+library("SpatialExperiment")
+library("ggspavis")
+library("SpotSweeper")
+library("scuttle")
+library("patchwork")
+library("scran")
+library("scater")
+library("scrapper")
+library("beachmat.hdf5")
+library("scater")
+library("dplyr")
+library("SingleR")
+library("celldex")
+library("HCATonsilData")
+library("readr")
+
+set.seed(99)
+
+# fix error in SpatialExperiment; see https://support.bioconductor.org/p/9161859/
+setClassUnion("ExpData", c("matrix", "SummarizedExperiment"))
+```
+
+
+# Load data
+
+
+```{r}
+spe <- HDF5Array::loadHDF5SummarizedExperiment("../data/visium-hd-tonsil-processed")
+```
+```{r}
+#| fig-height: 10
+
+df <- data.frame(colData(spe), spatialCoords(spe))
+
+
+ggplot(df, aes(pxl_col_in_fullres, pxl_row_in_fullres, col=clust_M0_lam0.3_k50_res0.3)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::alphabet(15))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+
+ggplot(df, aes(pxl_col_in_fullres, pxl_row_in_fullres, col=clust_M0_lam0.5_k50_res0.3)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::alphabet(15))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+
+ggplot(df, aes(pxl_col_in_fullres, pxl_row_in_fullres, col=clust_M0_lam0.5_k50_res0.5)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::alphabet(15))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+    
+ggplot(df, aes(pxl_col_in_fullres, pxl_row_in_fullres, col=clust_M0_lam0.5_k50_res0.8)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::alphabet(25))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+    
+ggplot(df, aes(pxl_col_in_fullres, pxl_row_in_fullres, col=PCAcluster)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::alphabet(15))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+    
+    
+```
+
+```{r}
+tmp <- spe[rowData(spe)$isHvg, ]
+```
+
+
+# Reference Dataset
+
+Massoni-Badosa R, Marini F, O'Callaghan A, Crowell H (2025). HCATonsilData: Provide programmatic access to the tonsil cell atlas datasets. doi:10.18129/B9.bioc.HCATonsilData, R package version 1.6.0, https://bioconductor.org/packages/HCATonsilData.
+
+```{r}
+sceTonsil <- HCATonsilData(assayType = "RNA", cellType = "All")
+
+colData(sceTonsil) |> 
+    as.data.frame() |> 
+    select(annotation_20230508, annotation_level_1, annotation_figure_1) |> 
+    unique() |> 
+     write_csv("../outs/tonsil-visium-hd/sceTonsil_annotation_levels.csv")
+```
+
+# PCA markers
+
+```{r}
+# marker identification
+mgsPCA <- findMarkers(tmp, groups = tmp$PCAcluster, test.type = "wilcox")
+# select for a few markers per cluster
+topPCA <- lapply(mgsPCA, \(df) rownames(df)[df$Top <= 10])
+topPCA <- unique(unlist(topPCA))
+pbsPCA <- scater::aggregateAcrossCells(
+    tmp,
+    ids = tmp$PCAcluster,
+    subset.row = topPCA,
+    use.assay.type = "logcounts",
+    statistics = "mean"
+)
+```
+
+
+```{r}
+#| fig-height: 30
+library("ComplexHeatmap")
+# visualize averages z-scaled across clusters
+rownames(pbsPCA) <- rowData(pbsPCA)$geneName
+pheatmap(
+    mat = logcounts(pbsPCA),
+    scale = "column",
+    breaks = seq(-2, 2, length = 101),
+    cellwidth = 20,
+    cellheight = 10,
+    treeheight_row = 5,
+    treeheight_col = 5
+)
+```
+
+
+```{r}
+pred <- SingleR(test = pbsPCA,
+                ref = sceTonsil,
+                labels = sceTonsil$annotation_20230508,
+                num.threads = 4)
+```
+
+```{r}
+pred |> 
+    as.data.frame() |> 
+    write_csv("../outs/tonsil-visium-hd/pbsPCA_SingleR_predicition.csv")
+```
+
+# Cell typing of Banksy clusters
+
+Take `clust_M0_lam0.5_k50_res0.8`
+
+
+```{r}
+# marker identification
+mgsBanksy <- findMarkers(tmp, groups = tmp$clust_M0_lam0.5_k50_res0.8, test.type = "wilcox")
+# select for a few markers per cluster
+topBansky <- lapply(mgsBanksy, \(df) rownames(df)[df$Top <= 10])
+topBansky <- unique(unlist(topBansky))
+pbsBanksy <- scater::aggregateAcrossCells(
+    tmp,
+    ids = tmp$clust_M0_lam0.5_k50_res0.8,
+    subset.row = topBansky,
+    use.assay.type = "logcounts",
+    statistics = "mean"
+)
+```
+
+
+```{r}
+#| fig-height: 30
+
+# visualize averages z-scaled across clusters
+rownames(pbsBanksy) <- rowData(pbsBanksy)$geneName
+pheatmap(
+    mat = logcounts(pbsBanksy),
+    scale = "column",
+    breaks = seq(-2, 2, length = 101),
+    cellwidth = 20,
+    cellheight = 10,
+    treeheight_row = 5,
+    treeheight_col = 5
+)
+```
+
+
+```{r}
+predBanksy <- SingleR(test = pbsBanksy,
+                ref = sceTonsil,
+                labels = sceTonsil$annotation_20230508,
+                num.threads = 4)
+```
+
+```{r}
+predBanksy |> 
+    as.data.frame() |> 
+    write_csv("../outs/tonsil-visium-hd/predBanksy_SingleR_predicition.csv")
+```
+
+# Match with data and plot
+
+```{r}
+# Vector of cluster labels for each cell
+ref <- colData(tmp)$PCAcluster
+labs <- pred$pruned.labels
+
+colData(spe)$PCAannot <- labs[ref]
+```
+
+
+```{r}
+# Vector of cluster labels for each cell
+ref <- colData(tmp)$clust_M0_lam0.5_k50_res0.8
+labs <- predBanksy$pruned.labels
+
+colData(spe)$BanksyAnnot <- labs[ref]
+```
+
+```{r}
+data.frame(colData(spe), spatialCoords(spe)) |> 
+ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=PCAannot)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::alphabet(15))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+
+data.frame(colData(spe), spatialCoords(spe)) |> 
+ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=BanksyAnnot)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::cols25(15))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+```
+# Save data
+
+```{r}
+HDF5Array::quickResaveHDF5SummarizedExperiment(spe)
+```
+
+
+```{r}
+sessionInfo()
+```
+

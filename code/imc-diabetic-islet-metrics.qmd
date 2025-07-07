@@ -1,0 +1,787 @@
+---
+title: "Correlation structure in IMC data"
+author: "Samuel Gunz"
+date:  last-modified
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+---
+
+
+```{r}
+#| message: false
+#| warning: false
+
+library("sosta")
+library("ggplot2")
+library("dplyr")
+library("tidyr")
+library("SpatialExperiment")
+library("ExperimentHub")
+library("lme4")
+library("lmerTest")
+library("ggfortify")
+library("dplyr")
+library("sf")
+
+
+set.seed(8048)
+```
+
+
+# Structure level metrics
+
+## Save spe object
+
+
+```{r}
+allIslets <- readRDS("../data/allIslets.rds" )
+spe <- readRDS("../data/spe_islets_sosta.rds" )
+```
+
+```{r}
+im <- shapeIntensityImage(
+    spe,
+    marks = "cell_category",
+    imageCol = "image_name",
+    imageId = "W38",
+    markSelect = "islet"
+)
+
+ggsave("../outs/figs/densityW38.pdf", im, width = 8, height = 4)
+```
+
+
+```{r, plot-data}
+#selPl <- sample(unique(spe$image_name), 4)
+selPl <- c("W38")
+#selPl <- c("E03", "G01", "W38", "Y20")
+
+df <- cbind(colData(spe[, spe$image_name %in% selPl]),
+            spatialCoords(spe[, spe$image_name %in% selPl]))
+```
+
+
+```{r, plot-data}
+im2 <- df |>
+  as.data.frame() |>
+  ggplot(aes(x = cell_x, y = cell_y, color = cell_category)) +
+  geom_point(size = 0.35) +
+  facet_wrap( ~ image_name, ncol = 2) +
+  coord_equal() +
+  theme_classic() +
+  scale_color_manual(values=unname(pals::cols25(n = 6))) +
+  guides(colour = guide_legend(override.aes = list(size=4))) +
+  theme_void() +
+  labs(color = "")
+
+
+im2
+
+ggsave("../outs/figs/ilsets.pdf", im2, width = 12, height = 8)
+```
+
+```{r}
+df |>
+  as.data.frame() |>
+  ggplot(aes(x = cell_x, y = cell_y, color = cell_category)) +
+  geom_point(size = 1.25) +
+  facet_wrap(~ image_name, ncol = 2) +
+  coord_equal() +
+  theme_classic() +
+  scale_color_manual(values=unname(pals::cols25(n = 5))) +
+  geom_sf(
+    data = allIslets[allIslets$image_name %in% selPl, ],
+    inherit.aes = FALSE,
+    color = "black",
+    linetype = "11",
+    fill = NA,
+    linewidth = 1.5
+  ) +
+  theme_void() +
+  labs(color = "") +
+  guides(colour = guide_legend(override.aes = list(size=4)))
+
+ggsave("../outs/figs/isletw38rec.pdf",width = 6, height = 4)
+```
+
+
+
+```{r}
+mets <- allIslets |> 
+    st_drop_geometry() |> 
+    dplyr::select(Area:shannonDivBorder) |> 
+    dplyr::select(-borderID)
+
+# NA to 0
+mets[is.na(mets)] <- 0
+allIslets[is.na(allIslets)] <- 0
+# set rownames
+rownames(mets) <- allIslets$structID
+# to matrix
+mets <- data.matrix(mets)
+```
+
+
+```{r}
+plot(log10(colMeans(mets)), log10(colVars(mets)))
+```
+
+```{r}
+
+allIslets |>
+    st_drop_geometry() |>
+    group_by(patient_id, patient_stage) |>
+    summarise(across(
+        c(Area, fibreWidth, fibreLength),
+        list(mean = mean, var = var),
+        .names = "{.col}_{.fn}"
+    ), .groups = "drop") |>
+    pivot_longer(
+        cols = -c(patient_id, patient_stage),
+        names_to = c("variable", "stat"),
+        names_sep = "_"
+    ) |>
+    pivot_wider(names_from = stat, values_from = value) |>
+    ggplot(aes(
+        x = mean,
+        y = var,
+        color = variable,
+        shape = patient_stage
+    )) +
+    geom_point(size = 2) +
+    theme_minimal() +
+    labs(
+        title = "Mean vs Variance per Patient",
+        x = "Mean",
+        y = "Variance",
+        color = "Variable",
+        shape = "Patient Stage"
+    ) +
+    scale_x_log10() +
+    scale_y_log10()
+
+
+```
+```{r}
+allIslets |>
+    st_drop_geometry() |>
+    mutate(across(everything(), ~replace_na(., 0))) |> 
+    group_by(patient_id, patient_stage, image_name) |>
+    summarise(across(
+        c(Area, fibreWidth, fibreLength),
+        list(mean = mean, var = var),
+        .names = "{.col}_{.fn}"
+    ), .groups = "drop") |>
+    pivot_longer(
+        cols = -c(patient_id, image_name, patient_stage),
+        names_to = c("variable", "stat"),
+        names_sep = "_"
+    ) |>
+    pivot_wider(names_from = stat, values_from = value) |>
+    ggplot(aes(
+        x = mean,
+        y = var,
+        color = variable,
+        shape = patient_stage
+    )) +
+    geom_point(size = 2) +
+    theme_minimal() +
+    labs(
+        title = "Mean vs Variance per Slide",
+        x = "Mean",
+        y = "Variance",
+        color = "Variable",
+        shape = "Patient Stage"
+    ) +
+    scale_x_log10() +
+    scale_y_log10()
+
+```
+```{r}
+allIslets |>
+    st_drop_geometry() |>
+    group_by(patient_id, patient_stage) |>
+    summarise(across(
+        c(Area),
+        list(mean = mean, var = var),
+        .names = "{.col}_{.fn}"
+    ), .groups = "drop") |>
+    pivot_longer(
+        cols = -c(patient_id, patient_stage),
+        names_to = c("variable", "stat"),
+        names_sep = "_"
+    ) |>
+    pivot_wider(names_from = stat, values_from = value) |>
+    ggplot(aes(
+        x = mean,
+        y = var,
+        color = variable,
+        shape = patient_stage
+    )) +
+    geom_point(size = 2) +
+    theme_minimal() +
+    labs(
+        title = "Mean vs Variance per Patient",
+        x = "Mean",
+        y = "Variance",
+        color = "Variable",
+        shape = "Patient Stage"
+    )
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 8
+
+allIslets |>
+    st_drop_geometry() |>
+    mutate(across(everything(), ~replace_na(., 0))) |> 
+    group_by(patient_id, patient_stage) |>
+    summarise(across(
+        c(prop_acinar:prop_B),
+        list(mean = mean, var = var),
+        .names = "{.col}:{.fn}"
+    ), .groups = "drop") |>
+    pivot_longer(
+        cols = -c(patient_id, patient_stage),
+        names_to = c("variable", "stat"),
+        names_sep = ":"
+    ) |>
+    pivot_wider(names_from = stat, values_from = value) |>
+    ggplot(aes(
+        x = mean,
+        y = var,
+        color = variable,
+        shape = patient_stage
+    )) +
+    geom_point(size = 2) +
+    theme_minimal() +
+    labs(
+        title = "Mean vs Variance per Patient",
+        x = "Mean",
+        y = "Variance",
+        color = "Variable",
+        shape = "Patient Stage"
+    ) +
+    scale_color_manual(values=unname(pals::cols25(n = 16)))
+```
+
+```{r}
+allIslets |> 
+  sf::st_drop_geometry() |> 
+  mutate(log10Area = log10(Area)) |> 
+  mutate("Beta cells (%)" = prop_beta) |> 
+  select(patient_stage, patient_id,  c("log10Area", "Beta cells (%)")) |> 
+  pivot_longer(-c(patient_stage, patient_id)) |> 
+  filter(name %in% c("log10Area", "Beta cells (%)")) |> 
+  ggplot(aes(x = as.factor(patient_id), y = value, fill = patient_stage)) + 
+  geom_violin() + 
+  geom_boxplot(aes(fill = NULL), width = 0.3) + 
+  facet_grid(name ~ patient_stage, scales = "free") + 
+  #scale_x_discrete(guide = guide_axis(n.dodge = 2)) + 
+  guides(fill = "none") + 
+  theme_bw() + 
+  scale_fill_manual(values = unname(pals::tol(n = 3))) +
+  theme_bw() +
+  labs(y = "Metric", x = "Patient ID")
+
+ggsave("../outs/figs/islets_metrics.pdf", width = 5, height = 3)
+```
+
+# Estimate Correlations
+
+## ICC 
+
+```{r}
+library("dplyr")
+library("ICC")  
+
+computeIccAnalysis <- function(data, stages, clusterVars, obsVar) {
+  # Code source: Yu et al. (2021) https://DOI:10.1016/j.neuron.2021.10.030
+  # Ensure cluster variables are factors
+  for (var in clusterVars) {
+    data[[var]] <- as.factor(data[[var]])
+  }
+  # Store results
+  iccResults <- list()
+  
+  for (clusterVar in clusterVars) {
+    iccDf <- data.frame(
+      stage = stages,
+      clusterBy = clusterVar,
+      nClusters = numeric(length(stages)),
+      icc = numeric(length(stages)),
+      designEffect = numeric(length(stages)),
+      effectiveN = numeric(length(stages)),
+      M = numeric(length(stages)),
+      cells = numeric(length(stages))
+    )
+
+    for (i in seq_along(stages)) {
+      stageData <- data |> subset(patient_stage == stages[i])
+      clusterFactor <- factor(stageData[[clusterVar]])
+
+      iccVal <- ICCbare(clusterFactor, stageData[[obsVar]])
+
+      nCells <- nrow(stageData)
+      nClusters <- length(unique(clusterFactor))
+      M <- nCells / nClusters
+      designEffect <- 1 + iccVal * (M - 1)
+      effectiveN <- nCells / designEffect
+
+      iccDf$nClusters[i] <- nClusters
+      iccDf$icc[i] <- iccVal
+      iccDf$designEffect[i] <- designEffect
+      iccDf$effectiveN[i] <- effectiveN
+      iccDf$M[i] <- M
+      iccDf$cells[i] <- nCells
+    }
+
+    iccResults[[clusterVar]] <- iccDf
+  }
+
+  finalIccAnalysis <- do.call(rbind, iccResults)
+  rownames(finalIccAnalysis) <- NULL
+  finalIccAnalysis$obsVar <- obsVar
+  return(finalIccAnalysis)
+}
+
+```
+
+
+```{r}
+stages <- c("Onset", "Non-diabetic", "Long-duration")
+clusterVars <- c("image_name", "patient_id")
+
+allIslets$sqrtArea <- sqrt(allIslets$Area)
+allIslets$log10Area <- log10(allIslets$Area)
+
+
+computeIccAnalysis(allIslets, stages, clusterVars, "Area")
+computeIccAnalysis(allIslets, stages, clusterVars, "sqrtArea")
+computeIccAnalysis(allIslets, stages, clusterVars, "log10Area")
+```
+```{r}
+allIslets$prop_beta_trans <- asin(allIslets$prop_beta)
+
+computeIccAnalysis(allIslets, stages, clusterVars, "prop_beta")
+computeIccAnalysis(allIslets, stages, clusterVars, "prop_beta_trans")
+```
+
+
+# Simulation for patient and slide effect
+
+Code adapted from Yu et al. (2021) DOI:10.1016/j.neuron.2021.10.030
+
+
+```{r}
+library("MASS")
+library("nlme")
+
+simulateLmeVsLm <- function(designDf, iccN1, iccN2, iccN3, 
+                            B = 100, alpha = 0.05, plotResults = TRUE, seed = 421) {
+  set.seed(seed)
+
+  # Extract counts per stage
+  n1 <- designDf[designDf$patient_stage == "Non-diabetic", "n", drop = TRUE]
+  n2 <- designDf[designDf$patient_stage == "Onset", "n", drop = TRUE]
+  n3 <- designDf[designDf$patient_stage == "Long-duration", "n", drop = TRUE]
+
+  # Build long-format data frame for modeling
+  baseData <- data.frame(
+    treatment_idx = rep(designDf$patient_stage, times = designDf$n),
+    pidx = rep(designDf$patient_id, times = designDf$n),
+    imix = rep(designDf$image_name, times = designDf$n)
+  )
+
+  # Pre-allocate p-value matrices
+  pLmNull <- matrix(0, B, 5)
+  pLmeNull <- matrix(0, B, 5)
+
+  # Begin simulation loop
+  for (b in 1:B) {
+    y <- numeric(0)
+
+    # Stage 1
+    for (j in seq_along(n1)) {
+      sigma <- diag(n1[j]) + matrix(iccN1, n1[j], n1[j])
+      y <- c(y, mvrnorm(n = 1, mu = rep(0, n1[j]), Sigma = sigma))
+    }
+
+    # Stage 2
+    for (j in seq_along(n2)) {
+      sigma <- diag(n2[j]) + matrix(iccN2, n2[j], n2[j])
+      y <- c(y, mvrnorm(n = 1, mu = rep(0, n2[j]), Sigma = sigma))
+    }
+
+    # Stage 3
+    for (j in seq_along(n3)) {
+      sigma <- diag(n3[j]) + matrix(iccN3, n3[j], n3[j])
+      y <- c(y, mvrnorm(n = 1, mu = rep(0, n3[j]), Sigma = sigma))
+    }
+
+    simData <- baseData
+    simData$res <- y
+
+    # Fit LME
+    objLme <- lme(res ~ treatment_idx, data = simData,
+                  random = list(pidx = ~1, imix = ~1), method = "ML",
+                  control = lmeControl(opt = "optim"))
+    pLmeNull[b, 1] <- anova(objLme)[2, 4]
+    pLmeNull[b, 2:5] <- coef(summary(objLme))[-1, 5]
+
+    # Fit LM
+    objLm <- lm(res ~ treatment_idx, data = simData)
+    pLmNull[b, 1] <- anova(objLm)[1, 5]
+    pLmNull[b, 2:5] <- coef(summary(objLm))[-1, 4]
+  }
+
+  # Output error rates
+  lmType1Error <- mean(pLmNull[, 1] < alpha)
+  lmeType1Error <- mean(pLmeNull[, 1] < alpha)
+
+  cat("Type I error rate of LM at α =", alpha, ":\n")
+  print(lmType1Error)
+
+  cat("Type I error rate of LME at α =", alpha, ":\n")
+  print(lmeType1Error)
+
+  # Optional plotting
+  if (plotResults) {
+    par(mfrow = c(1, 2))
+
+    h1 <- hist(pLmNull[, 1], breaks = 20, plot = FALSE)
+    h1$density <- h1$counts / sum(h1$counts) * 100
+    plot(h1, freq = FALSE, xlab = "", ylab = "Proportion (%)",
+         main = "Histogram of LM p-values", ylim = c(0, 100), xlim = c(0, 1))
+
+    h2 <- hist(pLmeNull[, 1], breaks = 20, plot = FALSE)
+    h2$density <- h2$counts / sum(h2$counts) * 100
+    plot(h2, freq = FALSE, xlab = "", ylab = "Proportion (%)",
+         main = "Histogram of LME p-values", ylim = c(0, 100), xlim = c(0, 1))
+  }
+
+  # Return results
+  return(list(
+    pLmNull = pLmNull,
+    pLmeNull = pLmeNull,
+    lmType1Error = lmType1Error,
+    lmeType1Error = lmeType1Error
+  ))
+}
+
+```
+
+
+```{r}
+# Construct designDf
+designDf <- allIslets |>
+  sf::st_drop_geometry() |>
+  dplyr::select(patient_id, patient_stage, image_name) |>
+  dplyr::group_by(patient_id, patient_stage, image_name) |>
+  dplyr::summarise(n = dplyr::n(), .groups = "drop")
+
+# Call the function
+results <- simulateLmeVsLm(
+  designDf = designDf,
+  iccN1 = 0.01908158 + 0.27264726,
+  iccN2 = 0.17514179 + 0.27600049,
+  iccN3 = 0.02250608 + 0.35758017,
+  B = 1000,
+  alpha = 0.05,
+  plotResults = TRUE
+)
+```
+
+# Dependence on ICC
+
+```{r}
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(tibble)
+
+# 1. Construct designDf
+designDf <- allIslets |>
+  sf::st_drop_geometry() |>
+  dplyr::select(patient_id, patient_stage, image_name) |>
+  group_by(patient_id, patient_stage, image_name) |>
+  summarise(n = n(), .groups = "drop")
+
+# 2. Create ICC grid (e.g. 0 to 1 in steps of 0.1)
+iccVals <- seq(0, 1, length.out = 8)
+iccGrid <- expand.grid(
+  iccN1 = iccVals,
+  iccN2 = iccVals,
+  iccN3 = iccVals
+)
+
+# 3. Wrapper to run simulations and collect errors
+simulateGridRow <- function(row, designDf, B = 100, alpha = 0.05) {
+  res <- simulateLmeVsLm(
+    designDf = designDf,
+    iccN1 = row$iccN1,
+    iccN2 = row$iccN2,
+    iccN3 = row$iccN3,
+    B = B,
+    alpha = alpha,
+    plotResults = FALSE
+  )
+  tibble(
+    iccN1 = row$iccN1,
+    iccN2 = row$iccN2,
+    iccN3 = row$iccN3,
+    lmType1Error = res$lmType1Error,
+    lmeType1Error = res$lmeType1Error
+  )
+}
+
+# 4. Run simulations for all ICC combinations
+simulationResults <- purrr::pmap_dfr(
+  iccGrid,
+  ~ simulateGridRow(
+      row = tibble(iccN1 = ..1, iccN2 = ..2, iccN3 = ..3),
+      designDf = designDf,
+      B = 100,
+      alpha = 0.05
+    )
+)
+
+# 5. View or analyze results
+print(simulationResults)
+
+```
+
+# Visualize
+
+```{r}
+#| fig-width: 15
+#| fig-height: 10
+round(simulationResults, 2) |> 
+    pivot_longer(cols = starts_with("lm"),
+                names_to = "model",
+                values_to = "type1error") |> 
+    ggplot() +
+    geom_point(aes(x = iccN3, y = type1error, color = model) ) +
+    geom_line(aes(x = iccN3, y = type1error, color = model) ) +
+    geom_hline(yintercept = 0.05, linetype = "dotted") +
+    facet_grid(iccN1 ~ iccN2) +
+    scale_color_manual(values = c("navy", "red3")) +
+    theme_light()
+```
+
+
+```{r}
+saveRDS(simulationResults, "../../outs/imc-islets/simResLM.rds")
+```
+
+
+
+
+
+
+
+```{r}
+library(MASS)   
+library(nlme)   
+
+set.seed(421)   
+B <- 1000
+
+# Pre-allocate p-value matrices
+p.lm.null <- matrix(0, B, 5)
+p.lme.null <- matrix(0, B, 5)
+
+
+icc.n1 <- 0.01908158 + 0.27264726  
+icc.n2 <- 0.17514179 + 0.27600049
+icc.n3 <- 0.02250608 + 0.35758017
+
+# Begin simulation loop
+for (b in 1:B) {
+  y <- NULL 
+
+  ncells <- n1
+  for (j in 1:length(ncells)) {
+    # Build compound symmetric covariance matrix with ICC
+    mysigma <- diag(ncells[j]) + 
+               matrix(icc.n1, ncells[j], 1) %*% 
+               matrix(icc.n1, 1, ncells[j])
+    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
+  }
+
+  ncells <- n2
+  for (j in 1:length(ncells)) {
+    mysigma <- diag(ncells[j]) +
+               matrix(icc.n2, ncells[j], 1) %*%
+               matrix(icc.n2, 1, ncells[j])
+    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
+  }
+
+  ncells <- n3
+  for (j in 1:length(ncells)) {
+    mysigma <- diag(ncells[j]) +
+               matrix(icc.n3, ncells[j], 1) %*%
+               matrix(icc.n3, 1, ncells[j])
+    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
+  }
+
+
+  # Assemble the simulated dataset
+  Ex1.sim <- data.frame(
+    res = y,
+    treatment_idx = Ex1$treatment_idx,
+    pidx = Ex1$pidx,
+    imix = Ex1$imix
+  )
+
+  # Fit Linear Mixed Effects Model (LME)
+  obj.lme <- lme(res ~ treatment_idx, data = Ex1.sim,
+                 random = list(pidx=~1, imix=~1), method = "ML")
+  p.lme.null[b, 1] <- anova(obj.lme)[2, 4]             # Overall F-test
+  p.lme.null[b, 2:5] <- coef(summary(obj.lme))[-1, 5]  # Group comparisons
+
+  # Fit Ordinary Linear Model (LM)
+  obj.lm <- lm(res ~ treatment_idx, data = Ex1.sim)
+  p.lm.null[b, 1] <- anova(obj.lm)[1, 5]               # Overall F-test
+  p.lm.null[b, 2:5] <- coef(summary(obj.lm))[-1, 4]    # Group comparisons
+}
+```
+
+
+```{r}
+# Output Type I Error Rates
+cat("Type I error rate of LM at α = 0.05:\n")
+print(mean(p.lm.null[,1] < 0.05))
+
+cat("Type I error rate of LME at α = 0.05:\n")
+print(mean(p.lme.null[,1] < 0.05))
+
+# Plot Histograms of p-values
+par(mfrow = c(1, 2))
+
+# LM p-value distribution
+h <- hist(p.lm.null[,1], nclass = 20, plot = FALSE)
+h$density <- h$counts / sum(h$counts) * 100
+plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)",
+     main = "Histogram of LM p-values", ylim = c(0, 100), xlim = c(0, 1))
+
+# LME p-value distribution
+h <- hist(p.lme.null[,1], nclass = 20, plot = FALSE)
+h$density <- h$counts / sum(h$counts) * 100
+plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)",
+     main = "Histogram of LME p-values", ylim = c(0, 100), xlim = c(0, 1))
+
+```
+## Beta cells
+
+```{r}
+library(MASS)   
+library(nlme)   
+
+set.seed(421)   
+B <- 1000
+
+# Pre-allocate p-value matrices
+p.lm.null <- matrix(0, B, 5)
+p.lme.null <- matrix(0, B, 5)
+
+
+icc.n1 <- 0.751485647 + 0.405180113	  
+icc.n2 <- 0.287959123 + 0.213844664
+icc.n3 <- -0.339234925 + -0.003473021
+
+# Begin simulation loop
+for (b in 1:B) {
+  y <- NULL 
+
+  ncells <- n1
+  for (j in 1:length(ncells)) {
+    # Build compound symmetric covariance matrix with ICC
+    mysigma <- diag(ncells[j]) + 
+               matrix(icc.n1, ncells[j], 1) %*% 
+               matrix(icc.n1, 1, ncells[j])
+    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
+  }
+
+  ncells <- n2
+  for (j in 1:length(ncells)) {
+    mysigma <- diag(ncells[j]) +
+               matrix(icc.n2, ncells[j], 1) %*%
+               matrix(icc.n2, 1, ncells[j])
+    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
+  }
+
+  ncells <- n3
+  for (j in 1:length(ncells)) {
+    mysigma <- diag(ncells[j]) +
+               matrix(icc.n3, ncells[j], 1) %*%
+               matrix(icc.n3, 1, ncells[j])
+    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
+  }
+
+
+  # Assemble the simulated dataset
+  Ex1.sim <- data.frame(
+    res = y,
+    treatment_idx = Ex1$treatment_idx,
+    pidx = Ex1$pidx,
+    imix = Ex1$imix
+  )
+
+  # Fit Linear Mixed Effects Model (LME)
+  obj.lme <- lme(res ~ treatment_idx, data = Ex1.sim,
+                 random = list(pidx=~1, imix=~1), method = "ML")
+  p.lme.null[b, 1] <- anova(obj.lme)[2, 4]             # Overall F-test
+  p.lme.null[b, 2:5] <- coef(summary(obj.lme))[-1, 5]  # Group comparisons
+
+  # Fit Ordinary Linear Model (LM)
+  obj.lm <- lm(res ~ treatment_idx, data = Ex1.sim)
+  p.lm.null[b, 1] <- anova(obj.lm)[1, 5]               # Overall F-test
+  p.lm.null[b, 2:5] <- coef(summary(obj.lm))[-1, 4]    # Group comparisons
+}
+```
+
+
+```{r}
+# Output Type I Error Rates
+cat("Type I error rate of LM at α = 0.05:\n")
+print(mean(p.lm.null[,1] < 0.05))
+
+cat("Type I error rate of LME at α = 0.05:\n")
+print(mean(p.lme.null[,1] < 0.05))
+
+# Plot Histograms of p-values
+par(mfrow = c(1, 2))
+
+# LM p-value distribution
+h <- hist(p.lm.null[,1], nclass = 20, plot = FALSE)
+h$density <- h$counts / sum(h$counts) * 100
+plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)",
+     main = "Histogram of LM p-values", ylim = c(0, 100), xlim = c(0, 1))
+
+# LME p-value distribution
+h <- hist(p.lme.null[,1], nclass = 20, plot = FALSE)
+h$density <- h$counts / sum(h$counts) * 100
+plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)",
+     main = "Histogram of LME p-values", ylim = c(0, 100), xlim = c(0, 1))
+
+```
+
+# Dependence on ICC
+
+```{r}
+
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
+

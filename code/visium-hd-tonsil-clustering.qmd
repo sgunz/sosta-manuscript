@@ -1,0 +1,126 @@
+---
+title: "Visium HD tonsil - Clustering"
+author: "Samuel Gunz"
+date:  last-modified
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+output-dir: "docs"
+---
+
+
+```{r}
+library("VisiumIO")
+library("SpatialExperiment")
+library("ggspavis")
+library("SpotSweeper")
+library("scuttle")
+library("patchwork")
+library("scran")
+library("scater")
+library("scrapper")
+library("beachmat.hdf5")
+library("scater")
+set.seed(99)
+
+# fix error in SpatialExperiment; see https://support.bioconductor.org/p/9161859/
+setClassUnion("ExpData", c("matrix", "SummarizedExperiment"))
+```
+
+
+```{r}
+spe <- HDF5Array::loadHDF5SummarizedExperiment("../data/visium-hd-tonsil-processed")
+```
+
+```{r}
+library("org.Hs.eg.db")
+
+genes <- AnnotationDbi::mapIds(
+  org.Hs.eg.db,
+  keys = rownames(spe),
+  column = 'SYMBOL',
+  keytype = 'ENSEMBL')
+
+rowData(spe)$geneName <- genes
+```
+
+# Spatial-clustering BANKSY
+
+```{r}
+library("Banksy")
+
+lambda <- 0.5
+k_geom <- 10
+npcs <- 20
+
+#subset
+tmp <- spe[rowData(spe)$isHvg, ]
+
+# Following Banksy vignette
+tmp <- computeBanksy(tmp, assay_name = "logcounts", k_geom = k_geom)
+set.seed(180)
+tmp <- runBanksyPCA(tmp, lambda = lambda, npcs = npcs)
+
+# Run several resolutions
+set.seed(81)
+tmp <- clusterBanksy(tmp, lambda = lambda, npcs = npcs, resolution = 0.3)
+set.seed(82)
+tmp <- clusterBanksy(tmp, lambda = lambda, npcs = npcs, resolution = 0.5)
+set.seed(83)
+tmp <- clusterBanksy(tmp, lambda = lambda, npcs = npcs, resolution = 0.8)
+```
+
+```{r}
+df <- data.frame(colData(tmp), spatialCoords(tmp))
+
+ggplot(df, aes(pxl_col_in_fullres, pxl_row_in_fullres, col=clust_M0_lam0.5_k50_res0.3)) +
+    geom_point(shape=16, stroke=0, size=0.4) +
+    scale_color_manual(values = unname(pals::alphabet(15))) +
+    coord_equal() + theme_void()
+```
+
+# Non-spatial clustering
+
+```{r}
+library("bluster")
+# Cluster based on first 20 PC's and using leiden
+colData(tmp)$PCAcluster <- clusterRows(reducedDim(tmp, "PCA")[,1:20],
+                                    BLUSPARAM = KNNGraphParam(
+                                      k = 12,
+                                      cluster.fun = "leiden",
+                                      cluster.args = list(
+                                          resolution = 0.3,
+                                          objective_function = "modularity")))
+```
+
+
+```{r}
+df <- data.frame(colData(tmp), spatialCoords(tmp))
+
+
+ggplot(df, aes(pxl_col_in_fullres, pxl_row_in_fullres, col=PCAcluster)) +
+    geom_point(shape=16, stroke=0, size=0.4) +
+    scale_color_manual(values = unname(pals::cols25(15))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8)))
+    
+```
+
+# Save data
+```{r}
+colData(spe) <- colData(tmp)
+
+HDF5Array::quickResaveHDF5SummarizedExperiment(spe)
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
+
+

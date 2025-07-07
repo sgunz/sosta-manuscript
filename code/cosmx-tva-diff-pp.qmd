@@ -1,0 +1,179 @@
+---
+title: "CosMx Tonsil strucutres - Differences"
+author: "Samuel Gunz"
+date:  last-modified
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+---
+# Setup
+
+```{r}
+#| message: false
+#| echo: false
+library("SpatialExperiment")
+library("sosta")
+library("ggplot2")
+library("tidyr")
+library("dplyr")
+library("sf")
+library("smoothr")
+library("spdep")
+library("ggspavis")
+
+theme_set(theme_bw())
+```
+
+Read in data
+
+```{r}
+spe <- readRDS("~/data_no_backup/CosMx_TVA/110.rds")
+spe <- toSpatialExperiment(spe, spatialCoordsNames = c("CenterX_global_px", "CenterY_global_px"))
+
+# selected fov of interest
+ls <- c(105, 106, 107, 108, 109, 110, 111, 133, 134, 135, 136, 137, 138, 139, 96, 97, 98, 25, 26, 27, 28, 29, 30, 382, 383, 384, 46, 47, 48, 49, 50, 51, 52, 59, 60, 61, 62, 63, 64, 65, 92, 93, 94, 95)
+
+gc()
+```
+
+
+```{r}
+#| fig-width: 5
+#| fig-height: 9
+
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = typ)) +
+  geom_point(size = 0.15, stroke = 0) + 
+  coord_equal() +
+  guides(colour = guide_legend(override.aes = list(size=4))) +
+  scale_color_manual(values = unname(pals::okabe(8)[-1]))
+```
+
+
+
+```{r}
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  filter(fov %in% ls) |> 
+  filter(fov < 300) |> 
+  dplyr::filter(fil == TRUE) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = fov)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() 
+```
+```{r}
+#| fig-width: 5
+#| fig-height: 9
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = lv1)) +
+  geom_point(size = 0.15, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = c("navy", "gold", "firebrick")) +
+  guides(colour = guide_legend(override.aes = list(size=3)))
+```
+
+# Structures per ROI
+
+```{r}
+spe$typ |> unique()
+```
+
+
+```{r}
+
+
+int <- shapeIntensityImage(
+  spe[,!is.na(spe$typ)],
+  marks = "lv1",
+  imageCol = "typ",
+  imageId = c("110_TVA2"),
+  markSelect = "epi"
+)
+
+int
+
+ppp <- SPE2ppp(spe, marks = "lv1",
+  imageCol = "typ",
+  imageId = c("110_TVA1"))
+plot(ppp)
+
+res <- .intensityImage(ppp, markSelect, bndw, dim)
+```
+
+
+```{r}
+params <- estimateReconstructionParametersSPE(
+    spe,
+    marks = "lv1",
+    imageCol = "typ",
+    markSelect = "epi",
+    plotHist = TRUE
+)
+```
+
+
+```{r}
+mean(params$thres)
+mean(params$bndw)
+```
+
+```{r}
+res <- reconstructShapeDensityImage(
+    spe,
+    marks = "lv1",
+    imageCol = "fov",
+    imageId = ls,
+    markSelect = "epi",
+    bndw = 50,
+    thres = 8.5E-5,
+    dim = 750
+)
+```
+
+
+```{r}
+cs1 <- grDevices::colorRampPalette(pals::alphabet(26))(dim(res)[1])
+
+res |>
+    mutate(struct = (cs1)) |>
+    ggplot() +
+    geom_sf(aes(fill = struct, color = struct)) +
+    guides(color = "none", fill = "none") +
+    scale_color_manual(values = cs1) +
+    scale_fill_manual(values = cs1) +
+    theme_void()
+```
+
+
+```{r}
+#| column: screen
+#| out-width: 100%
+#| fig-width: 8
+#| fig-heigth: 8 
+spe |>
+  (\(x) x[, colData(x)$fov %in% ls])() |>
+  (\(x) cbind(spatialCoords(x), colData(x)))() |>
+  as.data.frame() |>
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = lv1)) +
+  geom_point(size = 0.5, stroke = 0) +
+  coord_equal() +
+  scale_color_manual(values = c("steelblue", "lightgoldenrod", "orchid")) +
+  guides(colour = guide_legend(override.aes = list(size = 3))) +
+  geom_sf(
+    data = res,
+    fill = NA,
+    color = "black",
+    inherit.aes = FALSE,
+    # this is important
+    linewidth = 0.25
+  )
+```
+
+
