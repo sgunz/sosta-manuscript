@@ -8,6 +8,7 @@ format:
       self-contained: true
       highlight-style: github
       code-line-numbers: true
+output-dir: "../docs/"
 ---
 # Setup
 
@@ -23,6 +24,7 @@ library("sf")
 library("smoothr")
 library("spdep")
 library("ggspavis")
+library("mumosa")
 
 theme_set(theme_bw())
 ```
@@ -32,9 +34,23 @@ Read in data
 ```{r}
 spe <- readRDS("~/data_no_backup/CosMx_TVA/110.rds")
 spe <- toSpatialExperiment(spe, spatialCoordsNames = c("CenterX_global_px", "CenterY_global_px"))
+```
 
+
+```{r}
 # selected fov of interest
-ls <- c(105, 106, 107, 108, 109, 110, 111, 133, 134, 135, 136, 137, 138, 139, 96, 97, 98, 25, 26, 27, 28, 29, 30, 382, 383, 384, 46, 47, 48, 49, 50, 51, 52, 59, 60, 61, 62, 63, 64, 65, 92, 93, 94, 95)
+ls <- c(105, 106, 107, 108, 109, 110, 111,
+        133, 134, 135, 136, 137, 138, 139,
+        96, 97, 98,
+        #25, 
+        26,
+        27, 28, 29, 30,
+        #382, 383, 384,
+        46, 47, 48, 49,
+        50, 51, 
+        #52,
+        59, 60, 61, 62, 63, 64, 65,
+        92, 93, 94, 95)
 
 gc()
 ```
@@ -59,21 +75,21 @@ cbind(spatialCoords(spe), colData(spe)) |>
 ```{r}
 cbind(spatialCoords(spe), colData(spe)) |>
   as.data.frame() |> 
-  filter(fov %in% ls) |> 
-  filter(fov < 300) |> 
+  filter(fov %in% ls) |>
+  filter(fil == TRUE) |> 
   dplyr::filter(fil == TRUE) |> 
   ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = fov)) +
   geom_point(size = 0.5, stroke = 0) + 
   coord_equal() 
 ```
 ```{r}
-#| fig-width: 5
-#| fig-height: 9
+#| fig-width: 15
+#| fig-height: 35
 cbind(spatialCoords(spe), colData(spe)) |>
   as.data.frame() |> 
   dplyr::filter(fil == TRUE) |> 
   ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = lv1)) +
-  geom_point(size = 0.15, stroke = 0) + 
+  geom_point(size = 0.5, stroke = 0) + 
   coord_equal() +
   scale_color_manual(values = c("navy", "gold", "firebrick")) +
   guides(colour = guide_legend(override.aes = list(size=3)))
@@ -87,7 +103,7 @@ spe$typ |> unique()
 
 
 ```{r}
-
+#| eval: false
 
 int <- shapeIntensityImage(
   spe[,!is.na(spe$typ)],
@@ -96,15 +112,6 @@ int <- shapeIntensityImage(
   imageId = c("110_TVA2"),
   markSelect = "epi"
 )
-
-int
-
-ppp <- SPE2ppp(spe, marks = "lv1",
-  imageCol = "typ",
-  imageId = c("110_TVA1"))
-plot(ppp)
-
-res <- .intensityImage(ppp, markSelect, bndw, dim)
 ```
 
 
@@ -125,23 +132,23 @@ mean(params$bndw)
 ```
 
 ```{r}
-res <- reconstructShapeDensityImage(
+resSub <- reconstructShapeDensityImage(
     spe,
     marks = "lv1",
     imageCol = "fov",
     imageId = ls,
     markSelect = "epi",
     bndw = 50,
-    thres = 8.5E-5,
+    thres = 9.5E-5,
     dim = 750
 )
 ```
 
 
 ```{r}
-cs1 <- grDevices::colorRampPalette(pals::alphabet(26))(dim(res)[1])
+cs1 <- grDevices::colorRampPalette(pals::alphabet(26))(dim(resSub)[1])
 
-res |>
+resSub |>
     mutate(struct = (cs1)) |>
     ggplot() +
     geom_sf(aes(fill = struct, color = struct)) +
@@ -167,7 +174,7 @@ spe |>
   scale_color_manual(values = c("steelblue", "lightgoldenrod", "orchid")) +
   guides(colour = guide_legend(override.aes = list(size = 3))) +
   geom_sf(
-    data = res,
+    data = resSub,
     fill = NA,
     color = "black",
     inherit.aes = FALSE,
@@ -175,5 +182,398 @@ spe |>
     linewidth = 0.25
   )
 ```
+# All structs
 
+```{r}
+spe$foo <- "foo" # mock variable
+
+res1 <- reconstructShapeDensitySPE(
+    spe,
+    marks = "lv1",
+    imageCol = "foo",
+    markSelect = "epi",
+    bndw = 50,
+    thres = 9.5E-5,
+    dim = 2000
+)
+
+structs <- reconstructShapeDensitySPE(
+    spe,
+    marks = "lv1",
+    imageCol = "typ",
+    markSelect = "epi",
+    bndw = 50,
+    thres = 9E-5,
+    dim = 2000
+)
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cs1 <- sample(unname(pals::alphabet(26)), dim(res1)[1], replace = TRUE)
+
+res1 |>
+    mutate(struct = (cs1)) |>
+    ggplot() +
+    geom_sf(aes(fill = struct, color = struct)) +
+    guides(color = "none", fill = "none") +
+    scale_color_manual(values = cs1) +
+    scale_fill_manual(values = cs1) +
+    theme_void()
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cs1 <- sample(unname(pals::alphabet(26)), dim(structs)[1], replace = TRUE)
+
+structs |>
+    mutate(struct = (cs1)) |>
+    ggplot() +
+    geom_sf(aes(fill = struct, color = struct)) +
+    guides(color = "none", fill = "none") +
+    scale_color_manual(values = cs1) +
+    scale_fill_manual(values = cs1) +
+    theme_void()
+```
+
+## Custom code to assign cells to strucutres
+
+> To be implemented in sosta Bioc update
+
+```{r}
+library(parallel)
+df <- .SPE2df(spe, "typ")
+
+dls <- split(df, as.factor(df[, "typ"]))
+res <- mclapply(dls, function(dfSel) {
+  sel <- unique(dfSel[, "typ"])
+  structsSel <- structs[structs[["typ"]] == sel, 
+  ]
+  spatialCoordsSf <- st_as_sf(dfSel[, c(1, 2)], coords = c(colnames(dfSel)[1], 
+                                                           colnames(dfSel)[2]))
+  n <- st_intersects(spatialCoordsSf, structsSel, sparse = FALSE)
+  n_list <- apply(n, 1, function(x) which(x == TRUE)[1])
+  res <- ifelse(n_list == 0, NA, structsSel[["structID"]][n_list])
+  return(res)
+}, mc.cores = 1)
+```
+
+
+```{r}
+spe$typ0 <- ifelse(is.na(spe$typ), 0, spe$typ)
+colData(spe)$structAssign <- NA
+```
+
+This takes ages, why?!?
+
+```{r}
+#| eval: false
+#| include: false
+colData(spe[,spe$typ0 == "110_CRC"])$structAssign <- res$`110_CRC`
+colData(spe[,spe$typ0 == "110_REF"])$structAssign <- res$`110_REF`
+colData(spe[,spe$typ0 ==  "110_TVA1" ])$structAssign <- res$`110_TVA1`
+colData(spe[,spe$typ0 == "110_TVA2"])$structAssign <- res$`110_TVA2`
+colData(spe[,spe$typ0 == "110_TVA3"])$structAssign <- res$`110_TVA3`
+```
+
+More efficient way here: 
+```{r}
+#| eval: false
+#| include: false
+spe$structAssign2 <- NA  # initialize if not already present
+spe$structAssign2[spe$typ0 == "110_TVA3"] <- res$`110_TVA3`
+```
+
+```{r}
+assignStruct <- function(spe, resList, typ0Vals, 
+                         typ0 = "typ0", structAssign = "structAssign") {
+  # Initialize the structAssign column if it doesn't exist
+  if (!structAssign %in% colnames(colData(spe))) {
+    colData(spe)[[structAssign]] <- NA
+  }
+  
+  for (typ0Val in typ0Vals) {
+    mask <- colData(spe)[[typ0]] == typ0Val
+    colData(spe)[[structAssign]][mask] <- resList[[typ0Val]]
+  }
+  
+  return(spe)
+}
+
+typ0Vals <- c("110_CRC", "110_REF", "110_TVA1", "110_TVA2", "110_TVA3")
+spe <- assignStruct(spe, res, typ0Vals)
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 25
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE & fov %in% ls) |> 
+  #dplyr::filter(!is.na(structAssign)) |> 
+  dplyr::filter(lv1 == "epi") |>
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = structAssign)) +
+  geom_point(size = 1, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = c(cs1)) +
+  guides(colour = "none") +
+    geom_sf(
+    data = resSub,
+    fill = NA,
+    color = "navy",
+    inherit.aes = FALSE,
+    # this is important
+    linewidth = 0.75
+  )
+```
+
+# Struct metrics
+
+
+```{r}
+shapeMetrics <- totalShapeMetrics(structs)
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cbind(structs, t(shapeMetrics)) |>
+    ggplot() +
+    geom_sf(aes(fill = fibreWidth, color = fibreWidth)) +
+  scale_color_viridis_c(option = "A") +
+  scale_fill_viridis_c(option = "A")
+```
+```{r}
+shapeMetricsSub <- totalShapeMetrics(resSub)
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cbind(resSub, t(shapeMetricsSub)) |>
+    ggplot() +
+    geom_sf(aes(fill = fibreWidth, color = fibreWidth)) +
+  scale_color_viridis_c(option = "A") +
+  scale_fill_viridis_c(option = "A")
+```
+
+# Filter structs
+
+```{r}
+fq <- quantile(shapeMetrics["Area",], c(0.1))
+```
+
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cbind(resSub, t(shapeMetricsSub)) |>
+  filter(Area > fq[1]) |> 
+    ggplot() +
+    geom_sf(aes(fill = Area, color = Area)) +
+  scale_color_viridis_c(option = "C") +
+  scale_fill_viridis_c(option = "C")
+```
+
+```{r}
+filts <- names(which(shapeMetrics["Area", ] > fq[1]))
+spe$structAssignFilt <- ifelse(spe$structAssign %in% filts, spe$structAssign, NA)
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 20
+
+cs1 <- sample(unname(pals::alphabet(26)), dim(structs)[1], replace = TRUE)
+
+
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE & fov %in% ls) |> 
+  #dplyr::filter(!is.na(structAssign)) |> 
+  dplyr::filter(lv1 == "epi") |>
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = structAssignFilt)) +
+  geom_point(size = 1, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = c(cs1)) +
+  guides(colour = "none") +
+    geom_sf(
+    data = resSub,
+    fill = NA,
+    color = "navy",
+    inherit.aes = FALSE,
+    # this is important
+    linewidth = 0.75
+  )
+```
+
+
+# Aggregate across cells
+
+```{r}
+library("BiocParallel")
+library("scater")
+bpparam <- MulticoreParam(6)
+
+out <- aggregateAcrossCells(spe, spe$structAssignFilt,
+                     statistics = "prop.detected",
+                     BPPARAM = bpparam)
+```
+
+Merge with structure metrics
+
+```{r}
+aggMet <- t(shapeMetrics) |> 
+  as.data.frame() |> 
+  tibble::rownames_to_column("ids") |> 
+  rename(structArea = Area ) |> 
+  right_join(as.data.frame(colData(out)), by = "ids") |> 
+  tibble::column_to_rownames("ids")
+```
+
+## Prop detectedd
+
+```{r}
+feats <- c("structArea", "Compactness", "Eccentricity", "Circularity",
+                 "Solidity", "Curl", "fibreLength", "fibreWidth")
+
+
+geneCors <- computeCorrelations(counts(out),
+                    t(as.matrix(aggMet[out$ids, feats])),
+                    BPPARAM = bpparam
+                    )
+```
+
+```{r}
+selG <- names(which(rowSums(counts(out)) / dim(out)[2] > 0.1))
+
+"OLFM4" %in% selG
+```
+
+
+
+```{r}
+sign_corrs <- geneCors[!is.na(geneCors$FDR),]
+sign_corrs <- sign_corrs[sign_corrs$FDR < 0.1,]
+sign_corrs <- sign_corrs[order(abs(sign_corrs$rho), decreasing = TRUE),]
+```
+
+```{r}
+sel.correlcation <- sign_corrs[sign_corrs$feature2 %in% c("fibreWidth"),]
+
+sel.correlcation |>
+  as.data.frame() |> 
+  filter(feature1 %in% selG) |> 
+  arrange(desc(rho)) |> 
+  head(n = 20)
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+plotCoords(spe,
+          annotate = "RNF44",
+          in_tissue = NULL,
+          y_reverse = FALSE)
+```
+
+## Bulk Sum
+
+```{r}
+outSum <- aggregateAcrossCells(spe, spe$structAssignFilt,
+                     statistics = "sum",
+                     BPPARAM = bpparam)
+```
+
+
+```{r}
+geneCorsSum <- computeCorrelations(counts(outSum),
+                    t(as.matrix(aggMet[out$ids, feats])),
+                    BPPARAM = bpparam
+                    )
+```
+
+```{r}
+gene_corrs_Sum <- geneCorsSum[!is.na(geneCorsSum$FDR),]
+gene_corrs_Sum <- gene_corrs_Sum[gene_corrs_Sum$FDR < 0.1,]
+gene_corrs_Sum <- gene_corrs_Sum[order(abs(gene_corrs_Sum$rho), decreasing = TRUE),]
+
+gene_corrs_Sum
+```
+
+```{r}
+sel.correlcationSum <- gene_corrs_Sum[gene_corrs_Sum$feature2 %in% c("fibreWidth"),]
+
+sel.correlcationSum |>
+  as.data.frame() |> 
+  arrange(desc(rho)) |> 
+  head(n = 20)
+```
+
+```{r}
+gene_corrs_Sum[gene_corrs_Sum$feature1 == "OLFM4",]
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+plotCoords(spe,
+          annotate = "RSPH1",
+          in_tissue = NULL,
+          y_reverse = FALSE)
+```
+
+```{r}
+plotCoords(outSum,
+          annotate = "SPEG",
+          in_tissue = NULL,
+          y_reverse = FALSE)
+```
+## Bulk Mean
+
+```{r}
+outMean <- aggregateAcrossCells(spe, spe$structAssignFilt,
+                     statistics = "mean",
+                     BPPARAM = bpparam)
+```
+
+
+```{r}
+geneCorsMean <- computeCorrelations(counts(outMean),
+                    t(as.matrix(aggMet[out$ids, feats])),
+                    BPPARAM = bpparam
+                    )
+```
+
+```{r}
+gene_corrs_Mean <- geneCorsMean[!is.na(geneCorsMean$FDR),]
+gene_corrs_Mean <- gene_corrs_Mean[gene_corrs_Mean$FDR < 0.1,]
+gene_corrs_Mean <- gene_corrs_Mean[order(abs(gene_corrs_Mean$rho), decreasing = TRUE),]
+
+gene_corrs_Mean
+```
+
+```{r}
+sel.correlcationMean <- gene_corrs_Mean[gene_corrs_Mean$feature2 %in% c("fibreWidth"),]
+
+sel.correlcationMean |>
+  as.data.frame() |> 
+  arrange(rho) |> 
+  filter(feature1 %in% selG) |> 
+  tail(n = 20)
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+plotCoords(spe,
+          annotate = "ORC1",
+          in_tissue = NULL,
+          y_reverse = FALSE)
+```
 
