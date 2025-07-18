@@ -29,6 +29,26 @@ library("mumosa")
 theme_set(theme_bw())
 ```
 
+Set up for plotting
+
+```{r}
+# custom order
+.fw <- facet_wrap(~factor(typ, c("110_REF", "110_TVA1", "110_TVA2",
+                                 "110_TVA3", "110_CRC")))
+
+```
+
+```{r}
+# Specific color mapping - source: https://github.com/HelenaLC/WTx-TVA/blob/d75d0cd20a9880f11c1368e37ba39660e3f2e82c/code/_utils.R#L4
+typCols <- c(
+  "110_REF" = "seagreen",
+  "110_TVA1" = "dodgerblue",
+  "110_TVA2" = "royalblue",
+  "110_TVA3" = "slateblue",
+  "110_CRC" = "tomato"
+)
+```
+
 Read in data
 
 ```{r}
@@ -67,21 +87,9 @@ cbind(spatialCoords(spe), colData(spe)) |>
   geom_point(size = 0.15, stroke = 0) + 
   coord_equal() +
   guides(colour = guide_legend(override.aes = list(size=4))) +
-  scale_color_manual(values = unname(pals::okabe(8)[-1]))
+  scale_color_manual(values = typCols)
 ```
 
-
-
-```{r}
-cbind(spatialCoords(spe), colData(spe)) |>
-  as.data.frame() |> 
-  filter(fov %in% ls) |>
-  filter(fil == TRUE) |> 
-  dplyr::filter(fil == TRUE) |> 
-  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = fov)) +
-  geom_point(size = 0.5, stroke = 0) + 
-  coord_equal() 
-```
 ```{r}
 #| fig-width: 15
 #| fig-height: 35
@@ -94,6 +102,19 @@ cbind(spatialCoords(spe), colData(spe)) |>
   scale_color_manual(values = c("navy", "gold", "firebrick")) +
   guides(colour = guide_legend(override.aes = list(size=3)))
 ```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = fov)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() +
+  guides(colour = guide_legend(override.aes = list(size=3)))
+```
+
 
 # Structures per ROI
 
@@ -109,7 +130,7 @@ int <- shapeIntensityImage(
   spe[,!is.na(spe$typ)],
   marks = "lv1",
   imageCol = "typ",
-  imageId = c("110_TVA2"),
+  imageId = c("110_TVA1"),
   markSelect = "epi"
 )
 ```
@@ -121,7 +142,8 @@ params <- estimateReconstructionParametersSPE(
     marks = "lv1",
     imageCol = "typ",
     markSelect = "epi",
-    plotHist = TRUE
+    plotHist = TRUE,
+    dim = 750
 )
 ```
 
@@ -139,7 +161,7 @@ resSub <- reconstructShapeDensityImage(
     imageId = ls,
     markSelect = "epi",
     bndw = 50,
-    thres = 9.5E-5,
+    thres = 9.75E-5,
     dim = 750
 )
 ```
@@ -185,43 +207,19 @@ spe |>
 # All structs
 
 ```{r}
-spe$foo <- "foo" # mock variable
+spe$foo <- "foo"
 
-res1 <- reconstructShapeDensitySPE(
+structs <- reconstructShapeDensitySPE(
     spe,
     marks = "lv1",
     imageCol = "foo",
     markSelect = "epi",
     bndw = 50,
-    thres = 9.5E-5,
-    dim = 2000
-)
-
-structs <- reconstructShapeDensitySPE(
-    spe,
-    marks = "lv1",
-    imageCol = "typ",
-    markSelect = "epi",
-    bndw = 50,
-    thres = 9E-5,
-    dim = 2000
+    thres = 9.75E-5,
+    dim = 2500
 )
 ```
 
-```{r}
-#| fig-width: 15
-#| fig-height: 35
-cs1 <- sample(unname(pals::alphabet(26)), dim(res1)[1], replace = TRUE)
-
-res1 |>
-    mutate(struct = (cs1)) |>
-    ggplot() +
-    geom_sf(aes(fill = struct, color = struct)) +
-    guides(color = "none", fill = "none") +
-    scale_color_manual(values = cs1) +
-    scale_fill_manual(values = cs1) +
-    theme_void()
-```
 
 ```{r}
 #| fig-width: 15
@@ -238,74 +236,41 @@ structs |>
     theme_void()
 ```
 
-## Custom code to assign cells to strucutres
+## Assign cells to strucutres
 
-> To be implemented in sosta Bioc update
-
+```{r}
+#| eval: false
+assign <- assingCellsToStructures(spe, structs,
+    imageCol = "foo", nCores = 1
+)
+```
 ```{r}
 library(parallel)
-df <- .SPE2df(spe, "typ")
+df <- .SPE2df(spe, "foo", colNames = TRUE)
+#ls <- split(df, as.factor(df[, imageCol]))
 
-dls <- split(df, as.factor(df[, "typ"]))
-res <- mclapply(dls, function(dfSel) {
-  sel <- unique(dfSel[, "typ"])
-  structsSel <- structs[structs[["typ"]] == sel, 
-  ]
-  spatialCoordsSf <- st_as_sf(dfSel[, c(1, 2)], coords = c(colnames(dfSel)[1], 
-                                                           colnames(dfSel)[2]))
-  n <- st_intersects(spatialCoordsSf, structsSel, sparse = FALSE)
-  n_list <- apply(n, 1, function(x) which(x == TRUE)[1])
-  res <- ifelse(n_list == 0, NA, structsSel[["structID"]][n_list])
-  return(res)
-}, mc.cores = 1)
+blocks <- split(df, ceiling(seq_len(nrow(df)) / 10000))
+
+
+res <- mclapply(blocks, function(dfSel) {
+    structsSel <- structs
+    spatialCoordsSf <- st_as_sf(dfSel[, c(1, 2)], coords = c(colnames(dfSel)[1], 
+        colnames(dfSel)[2]))
+    n <- st_intersects(spatialCoordsSf, structsSel, sparse = FALSE)
+    n_list <- apply(n, 1, function(x) which(x == TRUE)[1])
+    res <- ifelse(n_list == 0, NA, structsSel[["structID"]][n_list])
+    return(data.frame(colnamesSPE = dfSel$colnamesSPE, structAssign = res))
+}, mc.cores = 5)
+
+rd <- do.call("rbind", res)
+out <- rd$structAssign
+names(out) <- rd$colnamesSPE
 ```
 
 
 ```{r}
-spe$typ0 <- ifelse(is.na(spe$typ), 0, spe$typ)
-colData(spe)$structAssign <- NA
+colData(spe)$structAssign <- out[colnames(spe)]
 ```
-
-This takes ages, why?!?
-
-```{r}
-#| eval: false
-#| include: false
-colData(spe[,spe$typ0 == "110_CRC"])$structAssign <- res$`110_CRC`
-colData(spe[,spe$typ0 == "110_REF"])$structAssign <- res$`110_REF`
-colData(spe[,spe$typ0 ==  "110_TVA1" ])$structAssign <- res$`110_TVA1`
-colData(spe[,spe$typ0 == "110_TVA2"])$structAssign <- res$`110_TVA2`
-colData(spe[,spe$typ0 == "110_TVA3"])$structAssign <- res$`110_TVA3`
-```
-
-More efficient way here: 
-```{r}
-#| eval: false
-#| include: false
-spe$structAssign2 <- NA  # initialize if not already present
-spe$structAssign2[spe$typ0 == "110_TVA3"] <- res$`110_TVA3`
-```
-
-```{r}
-assignStruct <- function(spe, resList, typ0Vals, 
-                         typ0 = "typ0", structAssign = "structAssign") {
-  # Initialize the structAssign column if it doesn't exist
-  if (!structAssign %in% colnames(colData(spe))) {
-    colData(spe)[[structAssign]] <- NA
-  }
-  
-  for (typ0Val in typ0Vals) {
-    mask <- colData(spe)[[typ0]] == typ0Val
-    colData(spe)[[structAssign]][mask] <- resList[[typ0Val]]
-  }
-  
-  return(spe)
-}
-
-typ0Vals <- c("110_CRC", "110_REF", "110_TVA1", "110_TVA2", "110_TVA3")
-spe <- assignStruct(spe, res, typ0Vals)
-```
-
 
 ```{r}
 #| fig-width: 15
@@ -332,7 +297,6 @@ cbind(spatialCoords(spe), colData(spe)) |>
 
 # Struct metrics
 
-
 ```{r}
 shapeMetrics <- totalShapeMetrics(structs)
 ```
@@ -346,9 +310,11 @@ cbind(structs, t(shapeMetrics)) |>
   scale_color_viridis_c(option = "A") +
   scale_fill_viridis_c(option = "A")
 ```
+
 ```{r}
 shapeMetricsSub <- totalShapeMetrics(resSub)
 ```
+
 
 ```{r}
 #| fig-width: 15
@@ -363,10 +329,8 @@ cbind(resSub, t(shapeMetricsSub)) |>
 # Filter structs
 
 ```{r}
-fq <- quantile(shapeMetrics["Area",], c(0.1))
+(fq <- quantile(shapeMetrics["Area",], c(0.4)))
 ```
-
-
 
 ```{r}
 #| fig-width: 15
@@ -411,6 +375,219 @@ cbind(spatialCoords(spe), colData(spe)) |>
   )
 ```
 
+# Metrics
+
+```{r}
+# Specific color mapping - source: https://github.com/HelenaLC/WTx-TVA/blob/d75d0cd20a9880f11c1368e37ba39660e3f2e82c/code/_utils.R#L4
+sm <- shapeMetrics |> 
+  t() |> 
+  as.data.frame() |> 
+  tibble::rownames_to_column("structAssign")
+
+df <- colData(spe)[!is.na(spe$structAssignFilt),] |> 
+  as.data.frame() |> 
+  left_join(sm, by = "structAssign" )
+```
+
+```{r}
+colData(spe) |> 
+  as.data.frame() |> 
+  filter(lv1 == "epi") |> 
+  select(lv2) |>
+  pull() |> 
+  unique() |> 
+  as.character() -> namesLv2
+
+lv2Cols <- pals::trubetskoy(length(namesLv2))
+names(lv2Cols) <- sort(namesLv2)
+```
+
+
+```{r}
+df |> 
+  filter(lv1 == "epi") |> 
+  ggplot(aes(x = reorder(lv2, fibreWidth), y = fibreWidth, fill = lv2)) +
+  geom_boxplot(alpha = 0.85) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  labs(fill = "") +
+  scale_fill_manual(values = lv2Cols) +
+  labs(title = "Fibre width per cell in different epi cell types")
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  filter(lv1 == "epi") |> 
+  filter(!is.na(structAssignFilt)) |> 
+  dplyr::filter(is.na(typ)) |> 
+  #dplyr::filter(!is.na(structAssign)) |> 
+  dplyr::filter(lv1 == "epi") |>
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px)) +
+  geom_point(size = 1, stroke = 0) + 
+  coord_equal() +
+      geom_sf(
+    data = structs,
+    fill = NA,
+    color = "navy",
+    inherit.aes = FALSE,
+    # this is important
+    linewidth = 0.75
+  )
+```
+
+
+
+```{r}
+df |> 
+  filter(lv1 == "epi") |> 
+  filter(!is.na(structAssignFilt)) |> 
+  ggplot(aes(x = reorder(typ, fibreWidth), y = fibreWidth, fill = typ)) +
+  geom_boxplot(alpha = 0.85) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  labs(fill = "") +
+  scale_fill_manual(values = typCols) +
+  labs(title = "Fibre width per cell in different regions")
+```
+```{r}
+# custom order
+.fw <- facet_wrap(~factor(typ, c("110_REF", "110_TVA1", "110_TVA2",
+                                 "110_TVA3", "110_CRC")))
+
+```
+
+```{r}
+df |> 
+  filter(lv1 == "epi") |> 
+  ggplot(aes(x = trj, y = fibreWidth, color = typ)) +
+  geom_point() +
+  labs(color = "") +
+  scale_color_manual(values = typCols) +
+  .fw
+```
+
+
+```{r}
+df |> 
+  filter(lv1 == "epi") |> 
+  group_by(structAssign) |> 
+  reframe(medianTrj = median(trj), medianFibreWitdh = median(fibreWidth), typ = typ) |> 
+  ggplot(aes(x = medianFibreWitdh, y = medianTrj, color = typ)) +
+  geom_point() +
+  labs(color = "") +
+  scale_color_manual(values = typCols) +
+  labs(title = "Median trajectory vs. mean fibre width per structure") +
+  geom_smooth(method = "lm", color = "black") +
+  .fw
+```
+
+```{r}
+df |> 
+  filter(lv1 == "epi") |> 
+  group_by(structAssign) |> 
+  reframe(medianPanCK = median(Mean.PanCK), medianFibreWitdh = median(fibreWidth), typ = typ) |> 
+  ggplot(aes(x = medianFibreWitdh, y = medianPanCK, color = typ)) +
+  geom_point() +
+  labs(color = "") +
+  scale_color_manual(values = typCols) +
+  labs(title = "Median panCK vs. mean fibre width per structure") +
+  geom_smooth(method = "lm", color = "black") +
+  .fw
+```
+
+# Proportions
+
+```{r}
+propsTyp <- cellTypeProportions(spe[, !is.na(spe$typ)], "structAssignFilt", "typ", nCores = 4)
+```
+
+
+```{r}
+propsTyp %>%
+  filter(if_any(everything(), ~ . < 0.99 & . > 0.01)) -> propsel
+```
+
+
+```{r}
+propsel |> 
+  tibble::rownames_to_column("structAssign") |>
+  left_join(sm, by = "structAssign") |> 
+  arrange(desc(Area))
+```
+
+```{r}
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  filter(structAssignFilt == "foo_10638") |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = typ)) +
+  geom_point(size = 1, stroke = 0) + 
+  coord_equal() +
+      geom_sf(
+    data = structs[structs$structID == "foo_10638",],
+    fill = NA,
+    color = "navy",
+    inherit.aes = FALSE,
+    # this is important
+    linewidth = 0.75
+  )
+```
+
+```{r}
+spe$trans <- "no"
+spe$trans[spe$structAssignFilt %in% rownames(propsel)] <- "yes"
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+
+trp <- "RT|RC|TT|TC|T2C"
+
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE) |> 
+  mutate(transCrpyt = case_when(
+    stringr::str_detect(roi, trp) & trans == "yes" ~ "both",
+    stringr::str_detect(roi, trp) ~ "original_annotation",
+    trans == "yes" ~ "sosta_only",
+    TRUE ~ NA_character_)) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = transCrpyt)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() +
+  guides(colour = guide_legend(override.aes = list(size=5))) +
+  scale_color_manual(values = c("darkred", "gold", "navy"))
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = trans)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = c("steelblue", "darkred")) +
+  guides(colour = guide_legend(override.aes = list(size=3)))
+```
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = roi)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() +
+  guides(colour = guide_legend(override.aes = list(size=3)))
+```
 
 # Aggregate across cells
 
