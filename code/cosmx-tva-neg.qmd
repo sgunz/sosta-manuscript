@@ -1,0 +1,542 @@
+---
+title: "CosMx Tonsil strucutres - Crypts"
+author: "Samuel Gunz"
+date:  last-modified
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+output-dir: "../docs/"
+---
+# Setup
+
+```{r}
+#| message: false
+#| echo: false
+library("SpatialExperiment")
+library("sosta")
+library("ggplot2")
+library("tidyr")
+library("dplyr")
+library("sf")
+library("smoothr")
+library("spdep")
+library("ggspavis")
+library("mumosa")
+
+theme_set(theme_bw())
+```
+
+Set up for plotting
+
+
+Set up for plotting
+
+```{r}
+# Specific color mapping - source: https://github.com/HelenaLC/WTx-TVA/blob/d75d0cd20a9880f11c1368e37ba39660e3f2e82c/code/_utils.R#L4
+# custom order
+.fw <- facet_wrap(~factor(typ, c("110_REF", "110_TVA1", "110_TVA2",
+                                 "110_TVA3", "110_CRC")))
+.pal_sub <- c(epi="gold2", imm="cyan2", str="magenta2")
+
+```
+
+```{r}
+# Specific color mapping - source: https://github.com/HelenaLC/WTx-TVA/blob/d75d0cd20a9880f11c1368e37ba39660e3f2e82c/code/_utils.R#L4
+typCols <- c(
+  "110_REF" = "seagreen",
+  "110_TVA1" = "dodgerblue",
+  "110_TVA2" = "royalblue",
+  "110_TVA3" = "slateblue",
+  "110_CRC" = "tomato"
+)
+```
+
+
+Read in data
+
+```{r}
+spe <- readRDS("~/data_no_backup/CosMx_TVA/110.rds")
+spe <- toSpatialExperiment(spe, spatialCoordsNames = c("CenterX_global_px", "CenterY_global_px"))
+```
+
+
+```{r}
+# selected fov of interest
+ls <- c(105, 106, 107, 108, 109, 110, 111,
+        133, 134, 135, 136, 137, 138, 139,
+        96, 97, 98,
+        #25, 
+        26,
+        27, 28, 29, 30,
+        #382, 383, 384,
+        46, 47, 48, 49,
+        50, 51, 
+        #52,
+        59, 60, 61, 62, 63, 64, 65,
+        92, 93, 94, 95)
+
+gc()
+```
+
+# Segment everything else
+
+
+```{r}
+spe$foo <- "foo"
+
+idx <- spatialCoords(spe)[,1] < 60000 & 
+  spatialCoords(spe)[,1] > 45000 & 
+  spatialCoords(spe)[,2] < 60000 & 
+  spatialCoords(spe)[,2] > 45000
+```
+
+
+```{r}
+resSub <- reconstructShapeDensitySPE(
+    spe[,idx],
+    marks = "lv1",
+    imageCol = "foo",
+    markSelect = c("epi", "imm", "str"),
+    bndw = 80,
+    thres = 9E-5,
+    dim = 500,
+    complement = TRUE
+)
+```
+
+
+```{r}
+cs1 <- grDevices::colorRampPalette(pals::alphabet(26))(dim(resSub)[1])
+
+resSub |>
+    mutate(struct = (cs1)) |>
+    ggplot() +
+    geom_sf(aes(fill = struct, color = struct)) +
+    guides(color = "none", fill = "none") +
+    scale_color_manual(values = cs1) +
+    scale_fill_manual(values = cs1) +
+    theme_void()
+```
+
+```{r}
+resSub$shape <- st_perimeter(resSub) / sqrt(st_area(resSub))
+resSub$area <- st_perimeter(resSub)
+
+resSub |>
+  filter(area < 90000 & area > 2000) |> 
+  ggplot() +
+  geom_sf(aes(fill = shape, color = shape)) +
+  scale_color_gradientn(colors = pals::parula()) +
+  scale_fill_gradientn(colors = pals::parula()) +
+  theme_void()
+```
+
+
+```{r}
+#| column: screen
+#| out-width: 100%
+#| fig-width: 6
+#| fig-heigth: 6
+
+spe[,idx] |>
+  (\(x) x[, colData(x)$fov %in% ls])() |>
+  (\(x) cbind(spatialCoords(x), colData(x)))() |>
+  as.data.frame() |>
+  filter(!is.na(lv1)) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = lv1)) +
+  geom_point(size = 0.5, stroke = 0) +
+  coord_equal() +
+  guides(colour = guide_legend(override.aes = list(size = 3))) +
+  geom_sf(
+    data = resSub,
+    fill = NA,
+    color = "black",
+    inherit.aes = FALSE,
+    # this is important
+    linewidth = 0.25
+  ) +
+  scale_color_manual(values = .pal_sub) +
+  theme_void()
+```
+# All structs
+
+```{r}
+structs <- reconstructShapeDensitySPE(
+    spe,
+    marks = "lv1",
+    imageCol = "foo",
+    markSelect = c("epi", "imm", "str"),
+    bndw = 80,
+    thres = 9E-5,
+    dim = 2500,
+    complement = TRUE
+)
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cs1 <- sample(unname(pals::alphabet(26)), dim(structs)[1], replace = TRUE)
+
+structs |>
+    mutate(struct = (cs1)) |>
+    ggplot() +
+    geom_sf(aes(fill = struct, color = struct)) +
+    guides(color = "none", fill = "none") +
+    scale_color_manual(values = cs1) +
+    scale_fill_manual(values = cs1) +
+    theme_void()
+```
+
+```{r}
+structs$area <- st_area(structs)
+structs$shape <- st_perimeter(structs) / sqrt(st_area(structs))
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+structs |>
+  filter(area < 2E9 & area > 1E5) |> 
+  ggplot() +
+  geom_sf(aes(fill = area, color = area)) +
+  scale_color_gradientn(colors = pals::jet()) +
+  scale_fill_gradientn(colors = pals::jet()) +
+  theme_void()
+
+structs |>
+  filter(area < 2E9 & area > 1E5) |> 
+  #filter(shape < 15) |> 
+  ggplot() +
+  geom_sf(aes(fill = shape, color = shape)) +
+  scale_color_gradientn(colors = pals::parula()) +
+  scale_fill_gradientn(colors = pals::parula()) +
+  theme_void()
+```
+
+```{r}
+structsFilt <- structs[structs$area < 2E9, ]
+```
+
+```{r}
+library(parallel)
+df <- .SPE2df(spe, "foo", colNames = TRUE)
+#ls <- split(df, as.factor(df[, imageCol]))
+
+blocks <- split(df, ceiling(seq_len(nrow(df)) / 10000))
+
+
+res <- mclapply(blocks, function(dfSel) {
+    structsSel <- structsFilt
+    spatialCoordsSf <- st_as_sf(dfSel[, c(1, 2)], coords = c(colnames(dfSel)[1], 
+        colnames(dfSel)[2]))
+    n <- st_intersects(spatialCoordsSf, structsSel, sparse = FALSE)
+    n_list <- apply(n, 1, function(x) which(x == TRUE)[1])
+    res <- ifelse(n_list == 0, NA, structsSel[["structID"]][n_list])
+    return(data.frame(colnamesSPE = dfSel$colnamesSPE, structAssign = res))
+}, mc.cores = 5)
+
+rd <- do.call("rbind", res)
+out <- rd$structAssign
+names(out) <- rd$colnamesSPE
+```
+
+
+```{r}
+colData(spe)$cryptAssign <- out[colnames(spe)]
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 25
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE & fov %in% ls) |> 
+  #dplyr::filter(!is.na(structAssign)) |> 
+  dplyr::filter(lv1 == "epi") |>
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = cryptAssign)) +
+  geom_point(size = 1, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = c(cs1)) +
+  guides(colour = "none") +
+    geom_sf(
+    data = resSub,
+    fill = NA,
+    color = "navy",
+    inherit.aes = FALSE,
+    # this is important
+    linewidth = 0.75
+  )
+```
+# Define borders
+
+```{r}
+bordersSub <- lapply(
+    st_geometry(resSub),
+    \(x) st_difference(st_buffer(x, 100), st_buffer(x, -50))
+) |>
+    st_as_sfc() |>
+    st_as_sf() # both functions needed for proper conversion
+
+plot(bordersSub)
+```
+
+```{r}
+#| column: screen
+#| out-width: 100%
+#| fig-width: 12
+#| fig-heigth: 12
+
+spe[,idx] |>
+  (\(x) x[, colData(x)$fov %in% ls])() |>
+  (\(x) cbind(spatialCoords(x), colData(x)))() |>
+  as.data.frame() |>
+  filter(!is.na(lv1)) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = lv1)) +
+  geom_point(size = 0.75, stroke = 0) +
+  coord_equal() +
+  guides(colour = guide_legend(override.aes = list(size = 3))) +
+  geom_sf(
+    data = bordersSub,
+    fill = NA,
+    color = "black",
+    inherit.aes = FALSE,
+    # this is important
+    linewidth = 0.25
+  ) +
+  scale_color_manual(values = .pal_sub) +
+  theme_void()
+```
+
+
+```{r}
+borders <- lapply(
+    st_geometry(structsFilt),
+    \(x) st_difference(st_buffer(x, 150), st_buffer(x, -50))
+) |>
+    st_as_sfc() |>
+    st_as_sf() # both functions needed for proper conversion
+
+plot(borders)
+
+borders$imageName <- structsFilt$imageName
+borders$borderID <- paste0("border_", structsFilt$structID)
+```
+
+```{r}
+resBord <- mclapply(blocks, function(dfSel) {
+    structsSel <- borders
+    spatialCoordsSf <- st_as_sf(dfSel[, c(1, 2)], coords = c(colnames(dfSel)[1], 
+        colnames(dfSel)[2]))
+    n <- st_intersects(spatialCoordsSf, structsSel, sparse = FALSE)
+    n_list <- apply(n, 1, function(x) which(x == TRUE)[1])
+    res <- ifelse(n_list == 0, NA, structsSel[["borderID"]][n_list])
+    return(data.frame(colnamesSPE = dfSel$colnamesSPE, structAssign = res))
+}, mc.cores = 5)
+
+rd <- do.call("rbind", resBord)
+out <- rd$structAssign
+names(out) <- rd$colnamesSPE
+```
+
+
+```{r}
+colData(spe)$cryptBorder <- out[colnames(spe)]
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 25
+
+cs1 <- sample(unname(pals::alphabet(26)), dim(borders)[1], replace = TRUE)
+
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE & fov %in% ls) |> 
+  #dplyr::filter(!is.na(structAssign)) |> 
+  dplyr::filter(lv1 == "epi") |>
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = cryptBorder)) +
+  geom_point(size = 1, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = c(cs1)) +
+  guides(colour = "none") +
+    geom_sf(
+    data = bordersSub,
+    fill = NA,
+    color = "navy",
+    inherit.aes = FALSE,
+    # this is important
+    linewidth = 0.75
+  )
+```
+
+# Prop cell types
+
+```{r}
+propsLv1 <- cellTypeProportions(spe[, !is.na(spe$typ)], "cryptBorder", "lv2", nCores = 4)
+```
+
+```{r}
+ncl <- colData(spe) |> 
+  as.data.frame() |> 
+  filter(!is.na(cryptBorder)) |> 
+  group_by(cryptBorder) |> 
+  summarise(ncells = n())
+```
+
+
+```{r}
+propsLv1 -> psl
+```
+
+
+```{r}
+psl |> 
+  tibble::rownames_to_column("cryptBorder") |>
+  left_join(ncl, by = "cryptBorder") -> psl
+```
+
+```{r}
+psl |>
+  mutate(epi.ref = rowSums(across(
+    c(
+      epi.EE,
+      epi.entero,
+      epi.goblet
+    )
+  ))) |>
+  mutate(epi.pat = rowSums(across(
+    c(`epi.goblet-like_REG4`,
+      `epi.entero-like_ACSF2`,
+      `epi.entero-like_EREG`,      
+      `epi.fetal-like_EMP1`,
+      `epi.fetal-like_MMP7`,
+      epi.inflam_REG1A,
+      `epi.paneth-like_DEFA6`,
+      epi.prolif,
+      epi.prolif_H1,
+      epi.prolif_STMN1,
+      epi.prolif_TACC3,
+      `epi.stem-like_CLU`,
+      `epi.stem-like_CLU`
+    )
+  ))) |>
+  mutate(epi.tot = epi.ref + epi.pat) |>
+  mutate(epi.ref.norm = epi.ref / (epi.ref + epi.pat)) |>
+  mutate(epi.pat.norm = epi.pat / (epi.ref + epi.pat)) -> psl
+```
+
+```{r}
+colData(spe) |>
+  as.data.frame() |> 
+  filter(!is.na(roi)) |> 
+  unique() |> 
+  pull(cryptBorder) -> annot
+
+
+psl |> 
+  filter(cryptBorder %in% annot) |> 
+  select(epi.ref:epi.pat.norm)
+```
+
+```{r}
+psl |> 
+  filter(epi.tot > 0.5 & epi.ref.norm > 0.01  & epi.pat > 0.5 & ncells < 500) |> 
+  pull(cryptBorder) -> stsel
+```
+
+```{r}
+length(stsel)
+
+colData(spe) |>
+  as.data.frame() |> 
+  filter(cryptBorder %in% stsel & !is.na(roi)) |> 
+  group_by(roi) |> 
+  summarize(n = n())
+```
+
+
+```{r}
+#| fig-width: 10
+#| fig-height: 18
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(cryptBorder %in% stsel) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = roi)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = pals::okabe()) +
+  guides(colour = guide_legend(override.aes = list(size=6)))
+```
+
+# Metrics
+
+```{r}
+sm <- structsFilt |> 
+  st_drop_geometry() |> 
+  select(area, shape)
+
+sm$cryptBorder <- borders$borderID
+
+df <- colData(spe)[!is.na(spe$cryptAssign),] |> 
+  as.data.frame() |> 
+  left_join(sm, by = "cryptBorder" )
+```
+
+```{r}
+#| fig-width: 5
+#| fig-height: 5
+df |> 
+  filter(lv1 == "epi") |>
+  filter(!is.na(typ) & typ != "110_CRC") |> 
+  filter(shape < 15 & area > 1E5) |> 
+  ggplot(aes(x = reorder(typ, shape), y = shape, fill = typ)) +
+  geom_boxplot(alpha = 0.85) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  labs(fill = "") +
+  scale_fill_manual(values = typCols) 
+  #labs(title = "Fibre width per cell in different regions")
+```
+
+```{r}
+#| fig-width: 5
+#| fig-height: 5
+df |> 
+  filter(lv1 == "epi") |> 
+  filter(shape < 15 & area > 1E5) |> 
+  filter(!is.na(typ) & typ != "110_CRC") |> 
+  #dplyr::filter(fov %in% ls) |> 
+  #filter(typ %in% c("110_REF", "110_TVA1")) |> 
+  group_by(cryptBorder) |> 
+  reframe(medianTrj = median(trj), medianShape= median(shape), typ = typ) |> 
+  ggplot(aes(x = medianShape, y = medianTrj, color = typ)) +
+  geom_point() +
+  labs(color = "") +
+  scale_color_manual(values = typCols) +
+  geom_smooth(method = "lm", color = "black")
+```
+```{r}
+df |> 
+ filter(lv1 == "epi") |> 
+  filter(shape < 15 & area > 1E5) |> 
+  filter(!is.na(typ) & typ != "110_CRC") |> 
+  #dplyr::filter(fov %in% ls) |> 
+  group_by(cryptBorder) |> 
+  reframe(medianTrj = median(trj), medianShape = median(shape), typ = typ) -> seltr
+
+
+cor.test(seltr$medianTrj, seltr$medianShape)
+```
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
