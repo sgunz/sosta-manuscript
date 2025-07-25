@@ -1,5 +1,5 @@
 ---
-title: "CosMx Tonsil strucutres - Differences"
+title: "CosMx CRC dataset - Analysis"
 author: "Samuel Gunz"
 date:  last-modified
 format: 
@@ -605,9 +605,7 @@ psl |>
   mutate(epi.ref.norm = epi.ref / (epi.ref + epi.pat)) |>
   mutate(epi.pat.norm = epi.pat / (epi.ref + epi.pat)) -> psl
 ```
-```{r}
-psl
-```
+
 ```{r}
 colData(spe) |>
   as.data.frame() |> 

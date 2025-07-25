@@ -1,0 +1,10 @@
+date:  last-modified
+format:
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+project:
+  execute-dir: file
+  output-dir: ../docs

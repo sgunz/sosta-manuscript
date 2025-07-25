@@ -1,0 +1,13 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+docs/*
+data/*
+misc/*
+outs/*
+code/.quarto/
+Code/ignore
+.DS_Store
+.Rprofile
+sosta-manuscript.Rproj
