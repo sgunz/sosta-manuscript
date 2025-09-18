@@ -15,6 +15,7 @@ format:
 ```{r}
 #| message: true
 #| warning: false
+#| echo: false
 
 library("VisiumIO")
 library("SpatialExperiment")
@@ -26,7 +27,6 @@ library("scran")
 library("scater")
 library("scrapper")
 library("beachmat.hdf5")
-library("scater")
 library("dplyr")
 library("SingleR")
 library("celldex")
@@ -69,9 +69,9 @@ spe$LabelFig1[is.na(spe$LabelFig1)] <- "unknown"
 
 ```{r}
 data.frame(colData(spe), spatialCoords(spe)) |> 
-ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=PCAannot)) +
+ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=BanksyAnnot)) +
     geom_point(shape=16, stroke=0, size=0.8) +
-    scale_color_manual(values = unname(pals::kelly(7))) +
+    scale_color_manual(values = unname(pals::cols25(13))) +
     coord_equal() + theme_void() +
     guides(colour = guide_legend(override.aes = list(size=8)))
 
@@ -90,16 +90,6 @@ ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=LabelFig1)) +
     guides(colour = guide_legend(override.aes = list(size=8)))
 
 ggsave("../outs/figs/tonsil-annot.pdf", width = 10, height = 10)
-```
-
-
-```{r}
-data.frame(colData(spe), spatialCoords(spe)) |> 
-ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=BanksyAnnot)) +
-    geom_point(shape=16, stroke=0, size=0.8) +
-    scale_color_manual(values = unname(pals::cols25(15))) +
-    coord_equal() + theme_void() +
-    guides(colour = guide_legend(override.aes = list(size=8)))
 ```
 
 
@@ -143,10 +133,15 @@ ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=LabelFig1)) +
         linewidth = 0.75
     )
 ```
+
 ```{r}
-#| fig-width: 10
-#| fig-height: 10
-plotSpots(spe, annotate = "EGR3",
+krts <- rowData(spe)[, "geneName"][grep("KRT", rowData(spe)[, "geneName"])]
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 8
+plotSpots(spe, annotate = "KRT14",
           feature_names = "geneName",
           assay_name = "logcounts",
           y_reverse = FALSE) + 
@@ -314,44 +309,43 @@ df <- df |>
                                     LabelFig1 == "epithelial" ~ "epithelial",
                                     .default = "other"))
 
-p1 <- ggplot() +
-    geom_point(
+r1 <- ggplot() +
+      ggrastr::rasterise(geom_point(
         aes(pxl_col_in_fullres, pxl_row_in_fullres, col = LabelFig1New),
         shape = 16,
         stroke = 0,
-        size = 0.75,
+        size = 0.2,
         data = df
-    ) +
-    scale_color_manual(values = c("dodgerblue3", "plum3", "gold", "skyblue3", "slategray2")) +
+    ), dpi = 300) +
+    scale_color_manual(values = c("dodgerblue3", "seagreen2", "gold", "skyblue3", "plum3")) +
     guides(colour = guide_legend(override.aes = list(size = 1 , alpha = 2))) +
     geom_sf(data = st_sfc(lines),
             color = "gray95",
-            linewidth = 1.25) +
+            linewidth = 0.8) +
         geom_sf(
         data = gcs_sel,
         fill = NA,
         color = "black",
         alpha = 0.5,
         inherit.aes = FALSE,
-        linewidth = 1.25
+        linewidth = 0.6
     ) +
     geom_point(data = GCBCcenter,
                aes(x = x, y = y),
                color = "orangered2",
                shape = 15,
-               size = 2.5) +
+               size = 0.8) +
     geom_point(data = Mantelcenter,
                aes(x = x, y = y),
                color = "mediumpurple2",
                shape = 15,
-               size = 2.5) +
+               size = 0.8) +
     theme_void() +
     guides(colour = guide_legend(override.aes = list(size=8))) +
     labs(color = "")
 
-p1
-
-ggsave("../outs/figs/tonsil-axes.pdf", width = 10, height = 10)
+r1
+#ggsave("../outs/figs/tonsil-axes.pdf", width = 10, height = 8)
 ```
 ```{r}
 Mantels_sf <- st_as_sf(as.data.frame(Mantelcenter), coords = c("x", "y"))
@@ -395,7 +389,6 @@ ggplot() +
 
 
 ```{r}
-
 st_perpendicular_line <- function(endpoint, line){
     # Define endpoints
     endpoint <- st_coordinates(endpoint)
@@ -528,11 +521,56 @@ ggsave("../outs/figs/tonsil-axes-dist.pdf", width = 10, height = 10)
 
 ```{r}
 spe$binned_dist <- as.factor(cut(spe$mantel_anchor_dist_norm, breaks = 30))
-
 spe_sel <- spe[,!is.na(spe$binned_dist)]
-
 lev <- combineFactors(spe_sel$binned_dist, keep.unused = FALSE)
+```
 
+```{r}
+#| fig-width: 8
+#| fig-height: 8
+df <- cbind(colData(spe), spatialCoords(spe))
+
+df <- df |> 
+    as.data.frame() |> 
+    mutate(LabelFig1New = case_when(LabelFig1 == "GCBC" ~ "GCBC",
+                                    LabelFig1 == "Activated NBC" ~ "Activated NBC",
+                                    LabelFig1 == "NBC" ~ "NBC",
+                                    LabelFig1 == "epithelial" ~ "epithelial",
+                                    .default = "other")) |> 
+    filter(!is.na(mantel_anchor_dist_norm)) |> 
+    mutate(mantel_anchor_dist_norm = as.numeric(mantel_anchor_dist_norm))
+
+ggplot() +
+  geom_point(
+    aes(pxl_col_in_fullres, pxl_row_in_fullres, color = binned_dist),
+    shape = 16,
+    stroke = 0,
+    size = 0.9,
+    data = df
+  ) +
+  geom_sf(
+    data = gcs_sel,
+    fill = NA,
+    color = "navy",
+    alpha = 0.5,
+    inherit.aes = FALSE,
+    linewidth = 1
+  ) +
+  geom_sf(data = st_sfc(lines),
+          color = "gold",
+          linewidth = 1) +
+  geom_sf(data = new_lines,
+          color = "seagreen",
+          linewidth = 1) +
+  theme_void() +
+  labs(color = "norm.\ndistance")
+
+
+#ggsave("../outs/figs/tonsil-axes-dist.pdf", width = 10, height = 10)
+```
+
+```{r}
+#| eval: false
 spe_agg <- scrapper::aggregateAcrossCells(
   logcounts(spe_sel),
   list(bins = spe_sel$binned_dist),
@@ -542,13 +580,21 @@ spe_agg <- scrapper::aggregateAcrossCells(
 saveRDS(spe_agg, "../data/spe_agg_binned_dist.rds")
 ```
 
+```{r}
+spe_agg <- readRDS("../data/spe_agg_binned_dist.rds")
+```
+
+```{r}
+aggMat <- apply(spe_agg$sums, 1, \(x) x / spe_agg$counts) |> t()
+
+dim(aggMat)
+```
 
 
 ```{r}
-aggMat <- spe_agg$sums[rowSums(spe_agg$sums) > 0,]
-
-sum(rowSums(aggMat) == 0)
-
+#| message: false
+#| echo: false
+#| warning: false
 res_MIC <- apply(aggMat, 1, function(x)
     mine(x,c(1:ncol(aggMat)))$MIC)
 
@@ -575,9 +621,63 @@ genes_interest_MAS <- res_MAS[order(res_MAS, decreasing = TRUE)] %>% names()
 
 
 ```{r}
+sel <- genes_interest_MIC[genes_interest_MIC > 0.99]
+sortG <- sort(rowSums(aggMat), decreasing = TRUE) |> names()
+sel <- sortG[sortG %in% sel][1:25]
+```
+
+```{r}
+mic_res <- res_MIC
+names(mic_res) <- rowData(spe)[names(mic_res), "geneName"]
+```
+
+```{r}
+mic_res["MKI67"]
+
+l <- rowData(spe)[names(sort(rowSums(aggMat), decreasing = TRUE) ), "geneName"]
+```
+
+
+```{r}
+which(l == "MKI67")
+which(l == "TUBB")
+```
+
+
+
+```{r}
 #| fig-width: 8
 #| fig-height: 6
-pheatmap::pheatmap(aggMat[genes_interest_MIC[1:100],],
+m <- aggMat[sel,]
+rownames(m) <- rowData(spe)[sel, "geneName"]
+
+colnames(m) <- round(seq(from = 0, to = 1, length.out = 30),2)
+
+ph <- pheatmap::pheatmap(t(m),
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_rows = FALSE,
+                   treeheight_row = 0,
+                   treeheight_col = 0,
+                   colorRampPalette(c("deepskyblue2", "white", "purple2"))(100),
+                   scale = "column")
+
+#ggsave("../outs/figs/tonsil-axes-mic-orient-select.pdf", ph, width = 6, height = 4)
+```
+
+```{r}
+lz_sel1 <- rownames(rowData(spe)[rowData(spe)$geneName %in%
+                                   c("IGHD", "COTL1", "IGHM", "CIITA", "CD83",
+                                     "HLA-DPA1", "CD83"),])
+dz_sel1 <- rownames(rowData(spe)[rowData(spe)$geneName %in%
+                                   c("CRIIP1","IGHA1", "IGHG1", "CRIP1",
+                                     "MKI67", "TUBB", "TUBB4B", "TOP2A"),])
+```
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+pheatmap::pheatmap(aggMat[genes_interest_MIC[1:20],],
                    #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
                    cluster_cols = FALSE,
                    show_rownames = FALSE,
@@ -589,15 +689,21 @@ pheatmap::pheatmap(aggMat[genes_interest_MIC[1:100],],
 ```{r}
 #| fig-width: 8
 #| fig-height: 6
-pheatmap::pheatmap(aggMat[genes_interest_MAS,],
+
+m <- aggMat[c(lz_sel1, dz_sel1),]
+rownames(m) <- rowData(spe)[c(lz_sel1, dz_sel1), "geneName"]
+
+pheatmap::pheatmap(m,
                    #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
                    cluster_cols = FALSE,
                    scale = "row")
 ```
-# Correlation
+## Correlation
 
 ```{r}
-#|warning: false
+#| warning: false
+#| message: false
+#| echo: false
 
 res_corr <- apply(aggMat, 1, function(x)
     cor.test(x,c(1:ncol(aggMat)), method = "spearman")$estimate)
@@ -640,15 +746,17 @@ dz_markers <- markers[markers$`FC human*` < 0, ]$`Official Gene Symbol`
 ```{r}
 length(c(lz_markers, dz_markers))
 
+sel <- names(res_MIC[res_MIC > 0.999])
+
 rowData(spe)[genes_interest_cor[1:100], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
-rowData(spe)[genes_interest_MIC[1:100], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
+rowData(spe)[sel, "geneName"] %in% c(lz_markers, dz_markers) |> sum()
 rowData(spe)[genes_interest_MAS[1:100], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
 
 ```
 
 ```{r}
 #| fig-width: 8
-#| fig-height: 6
+#| fig-height: 15
 
 lz_sel <- rownames(rowData(spe)[rowData(spe)$geneName %in% c(lz_markers),])
 
@@ -665,17 +773,482 @@ pheatmap::pheatmap(aggMat[dz_sel,],
                    scale = "row")
 ```
 
-# Select one GC
+# Select Germinal centers with same orientation
+
+```{r}
+#| fig-width: 12
+#| fig-height: 12
+dfTxt <- st_centroid(gcs) |> st_geometry() |> st_coordinates() |> as.data.frame()
+dfTxt$structID <- gcs$structID
+
+data.frame(colData(spe), spatialCoords(spe)) |> 
+ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=LabelFig1)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::kelly(10))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8))) +
+        geom_sf(
+        data = gcs,
+        fill = NA,
+        color = "black",
+        inherit.aes = FALSE, # this is important
+        linewidth = 0.75
+    ) + 
+  geom_sf(data = gcs, fill = NA, color = "darkblue",
+          alpha = 0.5, inherit.aes = FALSE, linewidth = 0.5) +
+  geom_text(data = dfTxt, aes(x = X, y = Y, label = structID),
+            inherit.aes = FALSE)
+```
+```{r}
+sel_gc <- c("sample01_1", "sample01_4", "sample01_6", "sample01_10",
+            "sample01_11","sample01_12", "sample01_21", "sample01_22", "sample01_24", "sample01_26", "sample01_30", "sample01_31", "sample01_32", "sample01_35", "sample01_39", "sample01_40")
+```
+
+```{r}
+#| fig-width: 12
+#| fig-height: 12
+dfTxt <- st_centroid(gcs) |> st_geometry() |> st_coordinates() |> as.data.frame()
+dfTxt$structID <- gcs$structID
+
+pp <- data.frame(colData(spe), spatialCoords(spe)) |> 
+ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=LabelFig1)) +
+    geom_point(shape=16, stroke=0, size=0.8) +
+    scale_color_manual(values = unname(pals::kelly(10))) +
+    coord_equal() + theme_void() +
+    guides(colour = guide_legend(override.aes = list(size=8))) +
+        geom_sf(
+        data = gcs[gcs$structID %in% sel_gc,],
+        fill = NA,
+        color = "black",
+        inherit.aes = FALSE, # this is important
+        linewidth = 1
+    ) + 
+  geom_text(data = dfTxt, aes(x = X, y = Y, label = structID),
+            inherit.aes = FALSE)
+```
+```{r}
+#| fig-width: 8
+#| fig-height: 8
+df <- cbind(colData(spe), spatialCoords(spe))
+
+idx <- gcs_sel$structID %in% sel_gc
+
+df <- df |> 
+    as.data.frame() |> 
+    mutate(LabelFig1New = case_when(LabelFig1 == "GCBC" ~ "GCBC",
+                                    LabelFig1 == "Activated NBC" ~ "Activated NBC",
+                                    LabelFig1 == "NBC" ~ "NBC",
+                                    LabelFig1 == "epithelial" ~ "epithelial",
+                                    .default = "other")) |> 
+    filter(!is.na(mantel_anchor_dist_norm)) |> 
+    mutate(mantel_anchor_dist_norm = as.numeric(mantel_anchor_dist_norm)) |> 
+  dplyr::filter(gcAssign %in% sel_gc)
+
+ggplot() +
+    ggrastr::rasterise(geom_point(
+    aes(pxl_col_in_fullres, pxl_row_in_fullres, color = mantel_anchor_dist_norm),
+    shape = 16,
+    stroke = 0,
+    size = 0.2,
+    data = df
+  ), dpi = 300) +
+  scale_color_gradient(low = "gray99", high = "blue3") +
+    geom_sf(data = st_sfc(lines)[idx,],
+          color = "gold",
+          linewidth = 0.6) +
+  geom_sf(
+    data = gcs_sel[idx,],
+    fill = NA,
+    color = "black",
+    alpha = 0.5,
+    inherit.aes = FALSE,
+    linewidth = 0.6
+  ) +
+  # geom_sf(data = new_lines[idx,],
+  #         color = "seagreen3",
+  #         linewidth = 1.25) +
+  theme_void() +
+  labs(color = "norm.\ndistance") -> r2
+
+r2
+#ggsave("../outs/figs/tonsil-axes-sel-dist.pdf", width = 10, height = 8)
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 8
+df <- cbind(colData(spe), spatialCoords(spe))
+
+idx <- gcs_sel$structID %in% sel_gc
+
+df <- df |> 
+    as.data.frame() |> 
+    mutate(LabelFig1New = case_when(LabelFig1 == "GCBC" ~ "GCBC",
+                                    LabelFig1 == "Activated NBC" ~ "Activated NBC",
+                                    LabelFig1 == "NBC" ~ "NBC",
+                                    LabelFig1 == "epithelial" ~ "epithelial",
+                                    .default = "other")) |> 
+    filter(!is.na(mantel_anchor_dist_norm)) |> 
+    mutate(mantel_anchor_dist_norm = as.numeric(mantel_anchor_dist_norm)) |> 
+  dplyr::filter(gcAssign %in% sel_gc) |> 
+  dplyr::filter(binned_dist == "(0.967,1]")
+
+pp2 <- ggplot() +
+  geom_point(
+    aes(pxl_col_in_fullres, pxl_row_in_fullres, color = mantel_anchor_dist_norm),
+    shape = 16,
+    stroke = 0,
+    size = 0.9,
+    data = df
+  ) +
+  scale_color_gradient(low = "blue1", high = "blue3") +
+  geom_sf(
+    data = gcs_sel[idx,],
+    fill = NA,
+    color = "black",
+    alpha = 0.5,
+    inherit.aes = FALSE,
+    linewidth = 0.25
+  ) 
+```
+
+```{r}
+#| fig-width: 20
+#| fig-height: 12
+pp + pp2
+```
 
 
 ```{r}
 spe_sel <- spe[,!is.na(spe$binned_dist)]
+spe_sel_orient <- spe_sel[, spe_sel$gcAssign %in% sel_gc]
+```
 
+
+```{r}
+#| eval: false
+#| include: false
+spe_agg_selorient <- scrapper::aggregateAcrossCells(
+  logcounts(spe_sel_orient),
+  list(bins = spe_sel_orient$binned_dist),
+  num.threads = 1
+)
+saveRDS(spe_agg_selorient, "../data/spe_agg_binned_dist_select.rds")
+```
+
+
+```{r}
+spe_agg_selorient <- readRDS("../data/spe_agg_binned_dist_select.rds")
+```
+
+
+```{r}
+aggMatorient <- apply(spe_agg_selorient$sums, 1, \(x) x / spe_agg_selorient$counts) |> t()
+```
+
+
+```{r}
+#| warning: false
+res_MICorient <- apply(aggMatorient, 1, function(x)
+    mine(x,c(1:ncol(aggMatorient)))$MIC)
+
+res_MASorient <- apply(aggMatorient, 1, function(x)
+    mine(x,c(1:ncol(aggMatorient)))$MAS)
+```
+
+
+
+```{r}
+genes_interest_MICorient <- res_MICorient[order(res_MICorient, decreasing = TRUE)] %>% names()
+genes_interest_MASorient <- res_MASorient[order(res_MASorient, decreasing = TRUE)] %>% names()
+
+sel <- names(res_MICorient[res_MICorient > 0.99])
+sortG <- sort(rowSums(aggMatorient), decreasing = TRUE) |> names()
+sel <- sortG[sortG %in% sel][1:25]
+```
+
+```{r}
+mic_res <- res_MICorient
+names(mic_res) <- rowData(spe)[names(mic_res), "geneName"]
+```
+
+```{r}
+mic_res["MKI67"]
+
+l <- rowData(spe)[names(sort(rowSums(aggMatorient), decreasing = TRUE) ), "geneName"]
+```
+
+
+```{r}
+which(l == "MKI67")
+which(l == "TUBB")
+```
+
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+
+m <- aggMatorient[sel,]
+rownames(m) <- rowData(spe)[sel, "geneName"]
+
+colnames(m) <- spe_agg_selorient$combinations |> unlist()
+
+ph <- pheatmap::pheatmap(t(m),
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_rows = FALSE,
+                   
+                   treeheight_row = 0,
+                   treeheight_col = 0,
+                   colorRampPalette(c("deepskyblue2", "white", "purple2"))(100),
+                   scale = "column")
+ph
+#ggsave("../outs/figs/tonsil-axes-mic-orient-select.pdf", ph, width = 6, height = 4)
+```
+
+## More genes
+
+```{r}
+genes_interest_MICorient <- res_MICorient[order(res_MICorient, decreasing = TRUE)] %>% names()
+genes_interest_MASorient <- res_MASorient[order(res_MASorient, decreasing = TRUE)] %>% names()
+
+sel <- names(res_MICorient[res_MICorient > 0.99])
+sortG <- sort(rowSums(aggMatorient), decreasing = TRUE) |> names()
+```
+
+```{r}
+mic_res <- res_MICorient
+names(mic_res) <- rowData(spe)[names(mic_res), "geneName"]
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+
+m <- aggMatorient[sel,]
+rownames(m) <- rowData(spe)[sel, "geneName"]
+
+colnames(m) <- round(seq(from = 0, to = 1, length.out = 30),2)
+
+sel1 <- c("IGHD", "COTL1", "IGHM", "CIITA", "HLA-DPA1", "CD83",
+          "CRIIP1","IGHA1", "MKI67", "TUBB", "TUBB4B", "TOP2A", "MHC1",
+          "IGKC", "IGIP", "IGHA2", "IGHG1", "TUBB2A", "TUBB4B")
+
+gene_names <- rownames(m)
+col_labels <- ifelse(gene_names %in% sel1, gene_names, "")
+
+
+
+
+ph <- pheatmap::pheatmap(t(m),
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_rows = FALSE,
+                   treeheight_row = 0,
+                   treeheight_col = 0,
+                   labels_col = col_labels,
+                   colorRampPalette(c("deepskyblue2", "white", "purple2"))(100),
+                   scale = "column")
+
+ph
+#ggsave("../outs/figs/tonsil-axes-mic-orient-select.pdf", ph, width = 6, height = 4)
+```
+```{r}
+sel <- names(res_MICorient[res_MICorient > 0.999])
+length(sel)
+```
+```{r}
+rowData(spe_sel_orient)[, "geneName"][grep("^IGK|JCHAIN|HLA", rowData(spe_sel_orient)[, "geneName"])]
+```
+```{r}
+rowData(spe)[, "geneName"][grep("DPA", rowData(spe)[, "geneName"])]
+```
+
+
+```{r}
+#| fig-width: 5
+#| fig-height: 5
+library("ComplexHeatmap")
+sortG <- sort(rowSums(aggMatorient), decreasing = TRUE) |> names()
+
+m <- aggMatorient[sel,]
+rownames(m) <- rowData(spe_sel_orient)[sel, "geneName"]
+
+colnames(m) <- round(seq(from = 0, to = 1, length.out = 30),2)
+colnames(m) <- rep("", 30)
+colnames(m)[1] <- "LZ"
+colnames(m)[30] <- "DZ"
+
+sel1 <- c("IGHD", "COTL1", "IGHM", "CIITA", "HLA-DPA1", "CD83",
+          "CRIIP1","IGHA1", "MKI67", "TUBB", "TUBB4B", "TOP2A", "MHC1",
+          "IGKC", "IGIP", "IGHA2", "IGHG1", "TUBB2A", "TUBB4B", "SRGN",
+          "JCHAIN")
+
+
+gene_names <- rownames(m)
+col_labels <- ifelse(gene_names %in% sel1, gene_names, "")
+
+# Scale gene expression
+mat_scaled <- t(scale(t(m)))
+mat_t <- t(mat_scaled)
+
+highlight_idx <- which(colnames(mat_t) %in% sel1)
+gen <- colnames(mat_t)[highlight_idx]
+
+# Create the heatmap
+Heatmap(mat_t,
+        show_row_names = TRUE,
+        show_column_names = FALSE,  
+        top_annotation = HeatmapAnnotation(
+          labels = anno_mark(at = highlight_idx,
+                             labels = gen,
+                             labels_gp = gpar(fontsize = 10))
+        ),
+        cluster_rows = FALSE,
+        cluster_columns = TRUE,
+        show_column_dend = FALSE,
+        col = circlize::colorRamp2(c(-2, 0, 2), c("deepskyblue2", "white", "purple2")),
+        heatmap_legend_param = list(title = "z-scaled\nmean expr.")) -> r3
+r3
+```
+
+
+## Markers
+```{r}
+#| fig-width: 5
+#| fig-height: 3
+
+sel1 <- c("IGHD", "COTL1", "IGHM", "CIITA", "HLA-DPA1", "CD83",
+          "CRIIP1","IGHA1", "MKI67", "TUBB", "TUBB4B", "TOP2A", "MHC1")
+
+rowData(spe)[, "geneName"][grep("HLA", rowData(spe)[, "geneName"])]
+
+m <- aggMatorient
+rownames(m) <- rowData(spe)[, "geneName"]
+
+sel1 <- sel1[sel1 %in% rownames(m)]
+
+pheatmap::pheatmap(t(m)[,sel1],
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_rows = FALSE,
+                   treeheight_row = 0,
+                   treeheight_col = 0,
+                   colorRampPalette(c("deepskyblue2", "white", "purple2"))(100),
+                   scale = "column")
+```
+
+
+### Correlation
+
+```{r}
+#| warning: false
+#| message: false
+#| echo: false
+
+res_corrorient <- apply(aggMatorient, 1, function(x)
+    cor.test(x,c(1:ncol(aggMatorient)), method = "spearman")$estimate)
+```
+
+
+```{r}
+genes_interest_cororient <- res_corrorient[order(abs(res_corrorient), decreasing = TRUE)] %>% names()
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 15
+
+m <- aggMatorient[genes_interest_cororient[1:30],]
+rownames(m) <- rowData(spe)[genes_interest_cororient[1:30], "geneName"]
+
+pheatmap::pheatmap(m,
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+```
+
+```{r}
+length(c(lz_markers, dz_markers))
+
+sel <- names(res_MICorient[res_MICorient > 0.999])
+
+rowData(spe)[genes_interest_cororient[1:50], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
+rowData(spe)[sel, "geneName"] %in% c(lz_markers, dz_markers) |> sum()
+rowData(spe)[genes_interest_MASorient[1:50], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
+
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 30
+
+lz_sel <- rownames(rowData(spe)[rowData(spe)$geneName %in% c(lz_markers),])
+
+m <- aggMatorient[lz_sel,]
+rownames(m) <- rowData(spe)[lz_sel, "geneName"]
+
+
+pheatmap::pheatmap(m,
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+```
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 20
+
+dz_sel <- rownames(rowData(spe)[rowData(spe)$geneName %in% c(dz_markers),])
+
+m <- aggMatorient[dz_sel,]
+rownames(m) <- rowData(spe)[dz_sel, "geneName"]
+
+
+pheatmap::pheatmap(m,
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+```
+```{r}
+#| fig-width: 5
+#| fig-height: 3
+
+lz_sel1 <- rownames(rowData(spe)[rowData(spe)$geneName %in%
+                                   c("IGHD", "COTL1", "IGHM", "CIITA", "CD83",
+                                     "HLA-DPA1", "CD83"),])
+dz_sel1 <- rownames(rowData(spe)[rowData(spe)$geneName %in%
+                                   c("CRIIP1","IGHA1", "MKI67", "TUBB", "TUBB4B", "TOP2A"),])
+
+pheatmap::pheatmap(aggMatorient[lz_sel1,],
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+
+dz_sel <- rownames(rowData(spe)[rowData(spe)$geneName %in% c(dz_markers),])
+
+pheatmap::pheatmap(aggMatorient[dz_sel1,],
+                   #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
+                   cluster_cols = FALSE,
+                   scale = "row")
+```
+
+```{r}
+res_MICorient[c(lz_sel1, dz_sel1)]
+```
+<!-- # Select one GC -->
+
+```{r}
+#| eval: false
+#| include: false
+spe_sel <- spe[,!is.na(spe$binned_dist)]
 spe_sel_22 <- spe_sel[, spe_sel$gcAssign == "sample01_22"]
 ```
 
 
 ```{r}
+#| eval: false
+#| include: false
 spe_agg_sel22 <- scrapper::aggregateAcrossCells(
   logcounts(spe_sel_22),
   list(bins = spe_sel_22$binned_dist),
@@ -685,6 +1258,8 @@ spe_agg_sel22 <- scrapper::aggregateAcrossCells(
 
 
 ```{r}
+#| eval: false
+#| include: false
 aggMat22 <- spe_agg_sel22$sums[rowSums(spe_agg_sel22$sums) > 0,]
 
 res_MIC22 <- apply(aggMat22, 1, function(x)
@@ -697,34 +1272,39 @@ res_MAS22 <- apply(aggMat22, 1, function(x)
 
 
 ```{r}
+#| eval: false
+#| include: false
 genes_interest_MIC22 <- res_MIC22[order(res_MIC22, decreasing = TRUE)] %>% names()
 genes_interest_MAS22 <- res_MAS22[order(res_MAS22, decreasing = TRUE)] %>% names()
 ```
 
-
-
 ```{r}
 #| fig-width: 8
-#| fig-height: 6
+#| fig-height: 15
+#| eval: false
+#| include: false
 
-m <- aggMat22[genes_interest_MIC22[1:20],]
-rownames(m) <- rowData(spe)[genes_interest_MIC22[1:20], "geneName"]
+m <- aggMat22[genes_interest_MIC22[1:70],]
+rownames(m) <- rowData(spe_sel_22)[genes_interest_MIC22[1:70], "geneName"]
 
-colnames(m) <- round(seq(from = 0, to = 1, length.out = 30),2)
+colnames(m) <- round(seq(from = 0, to = 1, length.out = dim(m)[2]),2)
 
-ph <- pheatmap::pheatmap(m,
+(ph <- pheatmap::pheatmap(m,
                    #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
                    cluster_cols = FALSE,
                    treeheight_row = 0,
-                   scale = "row")
-
-ggsave("../outs/figs/tonsil-axes-mic-22.pdf", ph, width = 6, height = 4)
+                   scale = "row"))
+#ggsave("../outs/figs/tonsil-axes-mic-22.pdf", ph, width = 6, height = 4)
 ```
 
-# Correlation
+<!-- ## Correlation -->
 
 ```{r}
-#|warning: false
+#| eval: false
+#| include: false
+#| warning: false
+#| message: false
+#| echo: false
 
 res_corr22 <- apply(aggMat22, 1, function(x)
     cor.test(x,c(1:ncol(aggMat22)), method = "spearman")$estimate)
@@ -732,15 +1312,19 @@ res_corr22 <- apply(aggMat22, 1, function(x)
 
 
 ```{r}
+#| eval: false
+#| include: false
 genes_interest_cor22 <- res_corr22[order(abs(res_corr22), decreasing = TRUE)] %>% names()
 ```
 
 ```{r}
 #| fig-width: 8
 #| fig-height: 6
+#| eval: false
+#| include: false
 
 m <- aggMat22[genes_interest_cor22[1:20],]
-rownames(m) <- rowData(spe)[genes_interest_cor22[1:20], "geneName"]
+rownames(m) <- rowData(spe_sel_22)[genes_interest_cor22[1:20], "geneName"]
 
 pheatmap::pheatmap(m,
                    #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
@@ -749,6 +1333,8 @@ pheatmap::pheatmap(m,
 ```
 
 ```{r}
+#| eval: false
+#| include: false
 length(c(lz_markers, dz_markers))
 
 rowData(spe)[genes_interest_cor22[1:25], "geneName"] %in% c(lz_markers, dz_markers) |> sum()
@@ -760,6 +1346,8 @@ rowData(spe)[genes_interest_MAS22[1:10], "geneName"] %in% c(lz_markers, dz_marke
 ```{r}
 #| fig-width: 8
 #| fig-height: 6
+#| eval: false
+#| include: false
 
 lz_sel <- rownames(rowData(spe)[rowData(spe)$geneName %in% c(lz_markers),])
 
@@ -774,5 +1362,21 @@ pheatmap::pheatmap(aggMat22[dz_sel,],
                    #color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYl"))),
                    cluster_cols = FALSE,
                    scale = "row")
+```
+```{r}
+#| fig-width: 12
+#| fig-height: 8
+
+library("patchwork")
+rsub <- r1 + r2
+
+ggsave("../misc/rsub.pdf", plot = rsub, width = 8, height = 3.5)
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
 ```
 

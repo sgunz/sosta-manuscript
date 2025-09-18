@@ -123,7 +123,7 @@ pbsPCA <- scater::aggregateAcrossCells(
 
 
 ```{r}
-#| fig-height: 30
+#| fig-height: 25
 library("ComplexHeatmap")
 # visualize averages z-scaled across clusters
 rownames(pbsPCA) <- rowData(pbsPCA)$geneName
@@ -147,6 +147,7 @@ pred <- SingleR(test = pbsPCA,
 ```
 
 ```{r}
+#| eval: false
 pred |> 
     as.data.frame() |> 
     write_csv("../outs/tonsil-visium-hd/pbsPCA_SingleR_predicition.csv")
@@ -174,7 +175,7 @@ pbsBanksy <- scater::aggregateAcrossCells(
 
 
 ```{r}
-#| fig-height: 30
+#| fig-height: 40
 
 # visualize averages z-scaled across clusters
 rownames(pbsBanksy) <- rowData(pbsBanksy)$geneName
@@ -189,7 +190,6 @@ pheatmap(
 )
 ```
 
-
 ```{r}
 predBanksy <- SingleR(test = pbsBanksy,
                 ref = sceTonsil,
@@ -198,6 +198,7 @@ predBanksy <- SingleR(test = pbsBanksy,
 ```
 
 ```{r}
+#| eval: false
 predBanksy |> 
     as.data.frame() |> 
     write_csv("../outs/tonsil-visium-hd/predBanksy_SingleR_predicition.csv")
@@ -240,6 +241,7 @@ ggplot(aes(pxl_col_in_fullres, pxl_row_in_fullres, col=BanksyAnnot)) +
 # Save data
 
 ```{r}
+#| eval: false
 HDF5Array::quickResaveHDF5SummarizedExperiment(spe)
 ```
 

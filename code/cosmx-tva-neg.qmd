@@ -13,8 +13,8 @@ output-dir: "../docs/"
 # Setup
 
 ```{r}
-#| message: false
-#| echo: false
+#| message: false 
+
 library("SpatialExperiment")
 library("sosta")
 library("ggplot2")
@@ -25,12 +25,9 @@ library("smoothr")
 library("spdep")
 library("ggspavis")
 library("mumosa")
-
+library("patchwork")
 theme_set(theme_bw())
 ```
-
-Set up for plotting
-
 
 Set up for plotting
 
@@ -54,7 +51,6 @@ typCols <- c(
 )
 ```
 
-
 Read in data
 
 ```{r}
@@ -62,6 +58,53 @@ spe <- readRDS("~/data_no_backup/CosMx_TVA/110.rds")
 spe <- toSpatialExperiment(spe, spatialCoordsNames = c("CenterX_global_px", "CenterY_global_px"))
 ```
 
+
+```{r}
+library("SpatialFeatureExperiment")
+```
+```{r}
+#| eval: false
+poly <- st_read("~/data_no_backup/CosMx_TVA/11/polygons.csv",
+                options=c("X_POSSIBLE_NAMES=x_global_px","Y_POSSIBLE_NAMES=y_global_px"))
+```
+
+
+```{r}
+#| eval: false
+polygons <- sfheaders::sf_polygon(
+  obj = poly,
+  x = "x_global_px",
+  y = "y_global_px",
+  polygon_id = "cell"
+)
+rm(poly)
+gc()
+```
+
+```{r}
+#| include: false
+#| eval: false
+st_write(polygons, "../data/polygon/poly.shp")
+```
+
+```{r}
+#| include: false
+polygons <- st_read("../data/polygon/poly.shp")
+```
+
+
+```{r}
+colData(spe) |> 
+  as.data.frame() |> 
+  filter(lv1 == "epi") |> 
+  select(lv2) |>
+  pull() |> 
+  unique() |> 
+  as.character() -> namesLv2
+
+lv2Cols <- pals::trubetskoy(length(namesLv2))
+names(lv2Cols) <- sort(namesLv2)
+```
 
 ```{r}
 # selected fov of interest
@@ -131,7 +174,11 @@ resSub |>
   geom_sf(aes(fill = shape, color = shape)) +
   scale_color_gradientn(colors = pals::parula()) +
   scale_fill_gradientn(colors = pals::parula()) +
-  theme_void()
+  theme_void() -> q1
+
+q1
+
+ggsave("../misc/fibWid.pdf", plot = q1, width = 3, height = 2.25)
 ```
 
 
@@ -403,14 +450,14 @@ psl |>
 
 ```{r}
 psl |>
-  mutate(epi.ref = rowSums(across(
+  mutate(epi_ref = rowSums(across(
     c(
       epi.EE,
       epi.entero,
       epi.goblet
     )
   ))) |>
-  mutate(epi.pat = rowSums(across(
+  mutate(epi_pat = rowSums(across(
     c(`epi.goblet-like_REG4`,
       `epi.entero-like_ACSF2`,
       `epi.entero-like_EREG`,      
@@ -426,9 +473,9 @@ psl |>
       `epi.stem-like_CLU`
     )
   ))) |>
-  mutate(epi.tot = epi.ref + epi.pat) |>
-  mutate(epi.ref.norm = epi.ref / (epi.ref + epi.pat)) |>
-  mutate(epi.pat.norm = epi.pat / (epi.ref + epi.pat)) -> psl
+  mutate(epi_tot = epi_ref + epi_pat) |>
+  mutate(epi_ref_norm = epi_ref / (epi_ref + epi_pat)) |>
+  mutate(epi_pat_norm = epi_pat / (epi_ref + epi_pat))  -> psl
 ```
 
 ```{r}
@@ -441,12 +488,12 @@ colData(spe) |>
 
 psl |> 
   filter(cryptBorder %in% annot) |> 
-  select(epi.ref:epi.pat.norm)
+  select(epi_ref:epi_pat_norm)
 ```
 
 ```{r}
 psl |> 
-  filter(epi.tot > 0.5 & epi.ref.norm > 0.01  & epi.pat > 0.5 & ncells < 500) |> 
+  filter(epi_tot > 0.5 & epi_ref_norm > 0.01  & epi_pat > 0.5 & ncells < 500) |> 
   pull(cryptBorder) -> stsel
 ```
 
@@ -461,6 +508,8 @@ colData(spe) |>
 ```
 
 
+
+
 ```{r}
 #| fig-width: 10
 #| fig-height: 18
@@ -473,6 +522,287 @@ cbind(spatialCoords(spe), colData(spe)) |>
   scale_color_manual(values = pals::okabe()) +
   guides(colour = guide_legend(override.aes = list(size=6)))
 ```
+
+```{r}
+psl |> 
+  filter(cryptBorder %in% stsel) |> 
+  select(cryptBorder, ncells, epi_ref:epi_pat_norm) |> 
+  arrange(desc(epi_ref_norm)) |> 
+  head(n = 20)
+```
+
+```{r}
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(cryptBorder %in% "border_foo_226") |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = lv2)) +
+  geom_point(size = 3, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = pals::cols25(25)) +
+  guides(colour = guide_legend(override.aes = list(size=6)))
+```
+
+```{r}
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(cryptBorder %in% "border_foo_1548") |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = lv2)) +
+  geom_point(size = 3, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = pals::cols25(25)) +
+  guides(colour = guide_legend(override.aes = list(size=6)))
+```
+```{r}
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(cryptBorder %in% "border_foo_535") |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = lv2)) +
+  geom_point(size = 2, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = pals::cols25(25)) +
+  guides(colour = guide_legend(override.aes = list(size=6)))
+```
+
+```{r}
+psl |> 
+  filter(epi_tot > 0.5 & epi_ref_norm > 0.1  & epi_pat > 0.5 & ncells < 500) |> 
+  filter(ncells > 20 & ncells < 70)
+```
+
+## More stricter selection for plotting
+
+```{r}
+psl |> 
+  filter(epi_tot > 0.5 & epi_ref_norm > 0.1 & epi_pat > 0.5 & ncells < 500) |> 
+  filter(ncells > 20 & ncells < 500) |> 
+  pull(cryptBorder) -> stsel1
+```
+
+```{r}
+#| fig-width: 20
+#| fig-height: 35
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(cryptBorder %in% stsel1) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px,
+             color = roi, label = cryptBorder)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = pals::okabe()) +
+  guides(colour = guide_legend(override.aes = list(size=6))) +
+  geom_text(stat = 'identity', check_overlap = TRUE)
+```
+
+
+```{r}
+polygons$polyID <- polygons$cell
+
+df <- colData(spe) |> 
+  as.data.frame() |> 
+  tibble::rownames_to_column("polyID")
+
+polygons <- polygons |>
+  left_join(df, by = "polyID")
+```
+
+```{r}
+polygons$typ <- as.factor(polygons$typ)
+polygons$lv2 <- as.factor(polygons$lv2)
+```
+
+```{r}
+polsel <- polygons |>
+      dplyr::filter(cryptBorder %in% c("border_foo_226", "border_foo_761"))
+```
+
+```{r}
+lv2ColsSel <- lv2Cols[names(lv2Cols) %in% unique(polsel$lv2)]
+typColsSel <- typCols[names(typCols) %in% unique(polsel$typ)]
+```
+
+
+```{r}
+polsel |>
+      dplyr::filter(cryptBorder %in% "border_foo_226") |>
+      ggplot() +
+      geom_sf(aes(fill = lv2), show.legend = TRUE) +
+      scale_fill_manual(values = lv2ColsSel,
+                        drop = FALSE) +
+      guides(colour = guide_legend(override.aes = list(size = 6))) +
+      labs(fill = "cell type") +
+      theme_void() -> q22
+
+polsel |>
+      dplyr::filter(cryptBorder %in% "border_foo_226") |>
+      ggplot() +
+      geom_sf(aes(fill = typ), show.legend = TRUE) +
+      scale_fill_manual(values = typColsSel,
+                        drop = FALSE) +
+      guides(colour = guide_legend(override.aes = list(size = 6))) +
+      theme_void() +
+      labs(fill = "ROI") -> q23
+
+polsel |>
+      dplyr::filter(cryptBorder %in% "border_foo_761") |>
+      ggplot() +
+      geom_sf(aes(fill = lv2), show.legend = TRUE) +
+      scale_fill_manual(values = lv2ColsSel,
+                        drop = FALSE) +
+      guides(colour = guide_legend(override.aes = list(size = 6))) +
+      labs(fill = "cell type") +
+      theme_void() -> q32
+
+polsel |>
+      dplyr::filter(cryptBorder %in% "border_foo_761") |>
+      ggplot() +
+      geom_sf(aes(fill = typ), show.legend = TRUE) +
+      scale_fill_manual(values = typColsSel,
+                        drop = FALSE) +
+      guides(colour = guide_legend(override.aes = list(size = 6))) +
+      theme_void() +
+      labs(fill = "ROI") -> q33
+```
+
+
+```{r}
+((q22 + q32) / (q23 + q33)) +
+  plot_layout(guides = 'collect') -> q3
+```
+
+```{r}
+(q23 + q33) +
+  plot_layout(guides = 'collect') 
+```
+
+
+```{r}
+polygons |>
+      dplyr::filter(cryptBorder %in% "border_foo_761") |>
+      ggplot() +
+      geom_sf(aes(fill = typ), show.legend = TRUE) +
+      scale_fill_manual(values = typCols,
+                        drop = FALSE) +
+      guides(colour = guide_legend(override.aes = list(size = 6))) +
+      theme_void() +
+      labs(fill = "")
+```
+
+```{r}
+polygons |>
+      dplyr::filter(cryptBorder %in% "border_foo_226") |>
+      ggplot() +
+      geom_sf(aes(fill = typ), show.legend = TRUE) +
+      scale_fill_manual(values = typCols,
+                        drop = FALSE)
+```
+
+
+<!-- ::: {.panel-tabset} -->
+
+```{r}
+#| results: asis
+#| fig-width: 12
+#| figh-height: 8
+
+for (selim in stsel1) {
+  #cat(paste0('\n### ', selim, '\n\n'))
+  p <- polygons |>
+      dplyr::filter(cryptBorder %in% selim) |>
+      ggplot() +
+      geom_sf(aes(fill = lv2)) +
+      scale_fill_manual(values = lv2Cols) +
+      guides(colour = guide_legend(override.aes = list(size = 6))) +
+      theme_void()
+
+  q <- polygons |>
+      dplyr::filter(cryptBorder %in% selim) |>
+      ggplot() +
+      geom_sf(aes(fill = typ)) +
+      scale_fill_manual(values = typCols) +
+      guides(colour = guide_legend(override.aes = list(size = 6))) +
+      theme_void()
+  comb <- p + q + 
+  plot_annotation(title = paste("Crypt:", selim))
+  plot(comb)
+  #cat('\n\n')
+}
+```
+<!-- ::: -->
+
+```{r}
+#| fig-width: 6
+#| fig-height: 8
+
+psl |> 
+  filter(cryptBorder %in% stsel1) |> 
+  select(cryptBorder, starts_with("epi.")) -> df
+
+df <- df |> 
+  mutate(
+    epi_row_sum = rowSums(across(starts_with("epi."))),
+    across(starts_with("epi."), ~ .x / epi_row_sum)
+  ) |> 
+  select(-epi_row_sum) 
+
+df_long <- df |> 
+  pivot_longer(cols = -cryptBorder, names_to = "cell_type", values_to = "percent")
+
+df_long |> 
+  ggplot(aes(x = cryptBorder, y = percent, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = lv2Cols) +
+  scale_y_continuous(labels = scales::percent) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip()
+  
+```
+
+
+```{r}
+#| fig-width: 6
+#| fig-height: 8
+
+colData(spe) |> 
+  as.data.frame() |> 
+  filter(cryptBorder %in% stsel1) |> 
+  select(cryptBorder, typ) |> 
+  ggplot(aes(cryptBorder, fill = typ)) +
+  geom_bar(position = "fill")  +
+  scale_y_continuous(labels = scales::percent) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  coord_flip() +
+  scale_fill_manual(values = typCols)
+```
+
+# Diversity
+
+```{r}
+library("vegan")
+
+structColumn <- "cryptBorder"
+cellTypeColumn <- "lv2"
+nCores <- 3
+
+
+df <- colData(spe)[, c(structColumn, cellTypeColumn)]
+df <- df[!is.na(df[[structColumn]]), ]
+
+# Split data frame
+ls <- split(df, as.factor(df[, 1]))
+
+# Compute the proportion of each cell type within each structure
+res <- mclapply(ls, function(dfSub) {
+    # Compute the frequency and normalize
+    idx <- diversity(table(dfSub[[cellTypeColumn]]), index = "shannon")
+    return(idx)
+}, mc.cores = nCores)
+
+# Combine into single df and name with structs id
+resComb <- do.call(rbind, res) |> as.data.frame()
+
+colnames(resComb) <- "shannonDiv"
+```
+
 
 # Metrics
 
@@ -517,11 +847,13 @@ df |>
   group_by(cryptBorder) |> 
   reframe(medianTrj = median(trj), medianShape= median(shape), typ = typ) |> 
   ggplot(aes(x = medianShape, y = medianTrj, color = typ)) +
-  geom_point() +
+  ggrastr::rasterise(geom_point(size = 1, stroke = 0), dpi = 300)  +
   labs(color = "") +
   scale_color_manual(values = typCols) +
-  geom_smooth(method = "lm", color = "black")
+  geom_smooth(method = "lm", color = "black") +
+  guides(color=guide_legend(override.aes=list(size = 4))) -> q2
 ```
+
 ```{r}
 df |> 
  filter(lv1 == "epi") |> 
@@ -534,6 +866,14 @@ df |>
 
 cor.test(seltr$medianTrj, seltr$medianShape)
 ```
+
+```{r}
+qsub <- q1 + q2 + q3
+
+ggsave("../misc/qsub.pdf", plot = qsub, width = 12, height = 4)
+```
+
+
 # Session Info
 
 ```{r}

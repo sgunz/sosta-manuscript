@@ -27,6 +27,7 @@ library("ggspavis")
 library("mumosa")
 library("BiocParallel")
 library("scater")
+library("ggrastr")
 bpparam <- MulticoreParam(6)
 
 theme_set(theme_bw())
@@ -98,30 +99,31 @@ cbind(spatialCoords(spe), colData(spe)) |>
 ```
 
 ```{r}
-#| fig-width: 12
-#| fig-height: 5
+#| fig-width: 8
+#| fig-height: 4
 cbind(spatialCoords(spe), colData(spe)) |>
   as.data.frame() |> 
   dplyr::filter(fil == TRUE) |> 
+  dplyr::filter(!is.na(lv1)) |> 
   ggplot(aes(y = -CenterX_global_px, x = CenterY_global_px, color = lv1)) +
-  geom_point(size = 0.25, stroke = 0) + 
+  ggrastr::rasterise(geom_point(size = 0.01, stroke = 0), dpi = 300) + 
   coord_equal() +
-  scale_color_manual(values = .pal_sub) +
-  guides(colour = guide_legend(override.aes = list(size=4))) +
-  theme_void()
+  scale_color_manual(values = .pal_sub,  labels = c("epithelial", "immune", "stromal")) +
+  guides(colour = guide_legend(override.aes = list(size=3))) +
+  labs(color = "") +
+  theme_void() +
+  theme(legend.position = "bottom")
+ggsave("../misc/slide110.pdf", width = 5, height = 2.85)
 ```
 
-
-# Structures per ROI
+# Structures per ROIs
 
 ```{r}
 spe$typ |> unique()
 ```
 
-
 ```{r}
 #| eval: false
-
 int <- shapeIntensityImage(
   spe[,!is.na(spe$typ)],
   marks = "lv1",
@@ -181,6 +183,8 @@ resSub |>
     scale_color_manual(values = cs1) +
     scale_fill_manual(values = cs1) +
     theme_void()
+
+ggsave("../misc/structs.pdf", width = 3, height = 3)
 ```
 
 
@@ -310,6 +314,7 @@ cbind(resSub, t(shapeMetricsSub)) |>
   scale_color_viridis_c(option = "A") +
   scale_fill_viridis_c(option = "A") +
   theme_void()
+ggsave("../misc/fibWid.pdf", width = 3, height = 2.25)
 ```
 
 # Filter structs
@@ -392,15 +397,20 @@ names(lv2Cols) <- sort(namesLv2)
 #| fig-heigth: 8
 df |> 
   filter(lv1 == "epi") |> 
-  ggplot(aes(x = reorder(lv2, fibreWidth), y = fibreWidth, fill = lv2)) +
-  geom_boxplot(alpha = 0.85) +
+  ggplot(aes(x = reorder(lv2, fibreWidth),
+             y = fibreWidth, fill = lv2)) +
+  geom_boxplot(alpha = 0.85, key_glyph="point") +
   theme(axis.title.x=element_blank(),
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank()) +
   labs(fill = "") +
-  scale_fill_manual(values = lv2Cols)
-  #labs(title = "Fibre width per cell in different epi cell types")
+  scale_fill_manual(values = lv2Cols) +
+  guides(fill=guide_legend(override.aes=list(shape=21, stroke=0, size=4),
+                           ncol = 1)) -> p2
+p2
+ggsave("../misc/bp-fibW.pdf", plot = p2, width = 7, height = 4.5)
 ```
+
 
 ```{r}
 #| fig-width: 5
@@ -410,30 +420,24 @@ df |>
   filter(lv1 == "epi") |> 
   filter(!is.na(structAssignFilt)) |> 
   ggplot(aes(x = reorder(typ, fibreWidth), y = fibreWidth, fill = typ)) +
-  geom_boxplot(alpha = 0.85) +
+  geom_boxplot(alpha = 0.85, key_glyph="point") +
   theme(axis.title.x=element_blank(),
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank()) +
   labs(fill = "") +
-  scale_fill_manual(values = typCols) 
-  #labs(title = "Fibre width per cell in different regions")
+  scale_fill_manual(values = typCols) +
+  guides(fill=guide_legend(override.aes=list(shape=21, stroke=0, size=4))) -> p1
+
+p1
+ggsave("../misc/bp-fibW-reg.pdf", plot = p1, width = 3, height = 4)
 ```
+
 ```{r}
 # custom order
 .fw <- facet_wrap(~factor(typ, c("110_REF", "110_TVA1", "110_TVA2",
                                  "110_TVA3", "110_CRC")))
-
 ```
 
-```{r}
-df |> 
-  filter(lv1 == "epi") |> 
-  ggplot(aes(x = trj, y = fibreWidth, color = typ)) +
-  geom_point() +
-  labs(color = "") +
-  scale_color_manual(values = typCols) +
-  .fw
-```
 
 
 ```{r}
@@ -444,12 +448,23 @@ df |>
   group_by(structAssign) |> 
   reframe(medianTrj = median(trj), medianFibreWitdh = median(fibreWidth), typ = typ) |> 
   ggplot(aes(x = medianFibreWitdh, y = medianTrj, color = typ)) +
-  geom_point() +
+    ggrastr::rasterise(geom_point(size = 1, stroke = 0), dpi = 300)  +
   labs(color = "") +
   scale_color_manual(values = typCols) +
   #labs(title = "Median trajectory vs. mean fibre width per structure") +
-  geom_smooth(method = "lm", color = "black")
+  geom_smooth(method = "lm", color = "black")  +
+  guides(color=guide_legend(override.aes=list(size = 4))) -> p3
+
+p3
 ```
+
+Collect for figure
+
+```{r}
+psub <- p1 + p2 + p3
+ggsave("../misc/psub.pdf", plot = psub, width = 12, height = 4)
+```
+
 
 ```{r}
 df |> 
@@ -460,7 +475,6 @@ df |>
 
 cor.test(seltr$medianTrj, seltr$medianFibreWitdh)
 ```
-
 
 ```{r}
 df |> 

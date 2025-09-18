@@ -1,15 +1,60 @@
 ---
-title: "Correlation structure in IMC data"
-author: "Samuel Gunz"
+title: "Supplement to: Analysis of anatomical multi-cellular structures from spatial omics data using sosta"
+author: 
+  - name: Samuel Gunz
+    affiliation:
+      - Department of Molecular Life Sciences and SIB Swiss Institute of Bioinformatics, University of Zurich, Zurich, Switzerland
+  - name: Helena Crowell
+    affiliation:
+      - Centro Nacional de Análisis Genómico, Barcelona, Spain
+  - name: Mark D. Robinson
+    affiliation:
+      - Department of Molecular Life Sciences and SIB Swiss Institute of Bioinformatics, University of Zurich, Zurich, Switzerland
 date:  last-modified
+bibliography: ../misc/sosta.bib
 format: 
-    html:
-      toc: true
-      self-contained: true
-      highlight-style: github
-      code-line-numbers: true
+  pdf: 
+    toc: false
+    number-sections: false
+    keep-tex: true
+    template-partials: 
+      - title.tex
+    include-in-header:
+      text: |
+        \usepackage[noblocks]{authblk}
+        \renewcommand*{\Authsep}{, }
+        \renewcommand*{\Authand}{, }
+        \renewcommand*{\Authands}{, }
+        \renewcommand\Affilfont{\small}
+pdf-engine: xelatex
+mainfont: Helvetica
+sansfont: Helvetica
+# format: 
+#     html:
+#       toc: true
+#       self-contained: true
+#       highlight-style: github
+#       code-line-numbers: true
 ---
 
+# Multi-sample multi-condition structure-based analysis
+
+Structure-based analysis in multi-sample multi-condition data adds a layer of complexity as we will illustrate in an analysis of a spatial proteomics imaging mass cytometry (IMC) dataset of @damondMapHumanType2019. This dataset characterizes pancreatic islets in the course of type-one diabetic progression across twelve patients and three conditions. As such it is serves as a good example for structure-based analysis as it contains well characterized anatomical structures, i.e., the islets and their biology is well studied.
+
+We use our point-pattern density reconstruction approach implemented in *sosta* [@gunzSostaPackageAnalysis2025] to reconstruct pancreatic islets and quantify corresponding biologically relevant features, ranging from geometric measures, such as the area of the islets to biologically relevant metrics such as the proportion of different cell types. To identify biologically relevant features, we then perform feature-wise differential analysis on the structure derived features. 
+
+Notably, two aspects of this dataset are characteristic for the challenges when performing differential analysis of structure-derived features. First, the different scale of different metrics. Structure-derived metrics can be positive-continuos (e.g., area), bound between zero and one (e.g., certain structure metrics such as the eccentricity) or discrete (e.g., number of observations within a structure). Note that some features can be represented differently, which impacts downstream modelling (e.g., cell types within a structures can be expressed as fractions, i.e., bounded between 0 and 1, or using positive discrete values).
+
+Second, the correlation structure of the dataset. As the dataset contains multiple islets per slide, multiple slides per patient and multiple patients per condition. Therefore, features derived from individual islet structures are not independent measurements. To quantify the correlation structure, we used the interclass correlation coefficient to measure correlation at different levels and generate simulations to assess potential problems when performing differential analysis. Not accounting for said correlation structure can be problematic as described in @yuTestANOVAApplications2022. 
+
+Notably, failing to account for the correlation on slide and patient level led to a false discovery rate of up to 20 \% based on certain metrics. Accounting for correlation using mixed-effects models however, can help to lower the FDR below the desired 5\% level. 
+
+All analyses are given below with inline code examples.
+
+<!-- Feature wise differential analysis contains certain problem such as the correlation between outcomes, to identify this challenge we made use of todo{(Simes correction, sccomp or whatever we decide on (Ways to model accounting for feature correlation, e.g. Simes correction, \textit{sccomp}\cite{mangiola_sccomp_2023}, Benjamini-Yekuteli..))}. -->
+
+
+## Load all libraries and data
 
 ```{r}
 #| message: false
@@ -26,88 +71,21 @@ library("lmerTest")
 library("ggfortify")
 library("dplyr")
 library("sf")
+library("MASS")
+library("nlme")
 
 
 set.seed(8048)
 ```
 
+Please have a look at the corresponding ["Reconstruction and analysis of pancreatic islets from IMC data" vignette of the sosta package](https://bioconductor.org/packages/release/bioc/vignettes/sosta/inst/doc/ImcDiabetesIsletsVignette.html) for details on the reconstruction of the islet cells and the quantification of structure related metrics.
 
-# Structure level metrics
-
-## Save spe object
-
+Here we load the precomputed islets and metrics.
 
 ```{r}
 allIslets <- readRDS("../data/allIslets.rds" )
 spe <- readRDS("../data/spe_islets_sosta.rds" )
 ```
-
-```{r}
-im <- shapeIntensityImage(
-    spe,
-    marks = "cell_category",
-    imageCol = "image_name",
-    imageId = "W38",
-    markSelect = "islet"
-)
-
-ggsave("../outs/figs/densityW38.pdf", im, width = 8, height = 4)
-```
-
-
-```{r, plot-data}
-#selPl <- sample(unique(spe$image_name), 4)
-selPl <- c("W38")
-#selPl <- c("E03", "G01", "W38", "Y20")
-
-df <- cbind(colData(spe[, spe$image_name %in% selPl]),
-            spatialCoords(spe[, spe$image_name %in% selPl]))
-```
-
-
-```{r, plot-data}
-im2 <- df |>
-  as.data.frame() |>
-  ggplot(aes(x = cell_x, y = cell_y, color = cell_category)) +
-  geom_point(size = 0.35) +
-  facet_wrap( ~ image_name, ncol = 2) +
-  coord_equal() +
-  theme_classic() +
-  scale_color_manual(values=unname(pals::cols25(n = 6))) +
-  guides(colour = guide_legend(override.aes = list(size=4))) +
-  theme_void() +
-  labs(color = "")
-
-
-im2
-
-ggsave("../outs/figs/ilsets.pdf", im2, width = 12, height = 8)
-```
-
-```{r}
-df |>
-  as.data.frame() |>
-  ggplot(aes(x = cell_x, y = cell_y, color = cell_category)) +
-  geom_point(size = 1.25) +
-  facet_wrap(~ image_name, ncol = 2) +
-  coord_equal() +
-  theme_classic() +
-  scale_color_manual(values=unname(pals::cols25(n = 5))) +
-  geom_sf(
-    data = allIslets[allIslets$image_name %in% selPl, ],
-    inherit.aes = FALSE,
-    color = "black",
-    linetype = "11",
-    fill = NA,
-    linewidth = 1.5
-  ) +
-  theme_void() +
-  labs(color = "") +
-  guides(colour = guide_legend(override.aes = list(size=4)))
-
-ggsave("../outs/figs/isletw38rec.pdf",width = 6, height = 4)
-```
-
 
 
 ```{r}
@@ -127,11 +105,8 @@ mets <- data.matrix(mets)
 
 
 ```{r}
-plot(log10(colMeans(mets)), log10(colVars(mets)))
-```
-
-```{r}
-
+#| include: false
+#| eval: false
 allIslets |>
     st_drop_geometry() |>
     group_by(patient_id, patient_stage) |>
@@ -163,10 +138,10 @@ allIslets |>
     ) +
     scale_x_log10() +
     scale_y_log10()
-
-
 ```
 ```{r}
+#| include: false
+#| eval: false
 allIslets |>
     st_drop_geometry() |>
     mutate(across(everything(), ~replace_na(., 0))) |> 
@@ -191,7 +166,7 @@ allIslets |>
     geom_point(size = 2) +
     theme_minimal() +
     labs(
-        title = "Mean vs Variance per Slide",
+        title = "Mean vs Variance per Slide (log10 transformed)",
         x = "Mean",
         y = "Variance",
         color = "Variable",
@@ -199,9 +174,11 @@ allIslets |>
     ) +
     scale_x_log10() +
     scale_y_log10()
-
 ```
+
 ```{r}
+#| include: false
+#| eval: false
 allIslets |>
     st_drop_geometry() |>
     group_by(patient_id, patient_stage) |>
@@ -236,6 +213,8 @@ allIslets |>
 ```{r}
 #| fig-width: 10
 #| fig-height: 8
+#| include: false
+#| eval: false
 
 allIslets |>
     st_drop_geometry() |>
@@ -270,12 +249,14 @@ allIslets |>
     scale_color_manual(values=unname(pals::cols25(n = 16)))
 ```
 
+Let's inspect two metrics. Fraction of beta cells within each islet and the log10 transformed area of the islets.
+
 ```{r}
 allIslets |> 
   sf::st_drop_geometry() |> 
   mutate(log10Area = log10(Area)) |> 
   mutate("Beta cells (%)" = prop_beta) |> 
-  select(patient_stage, patient_id,  c("log10Area", "Beta cells (%)")) |> 
+  dplyr::select(patient_stage, patient_id,  c("log10Area", "Beta cells (%)")) |> 
   pivot_longer(-c(patient_stage, patient_id)) |> 
   filter(name %in% c("log10Area", "Beta cells (%)")) |> 
   ggplot(aes(x = as.factor(patient_id), y = value, fill = patient_stage)) + 
@@ -288,13 +269,13 @@ allIslets |>
   scale_fill_manual(values = unname(pals::tol(n = 3))) +
   theme_bw() +
   labs(y = "Metric", x = "Patient ID")
-
-ggsave("../outs/figs/islets_metrics.pdf", width = 5, height = 3)
 ```
 
-# Estimate Correlations
+As we can see, there is variation at the patient and condition level.
 
-## ICC 
+# Estimate Correlations using ICC 
+
+To estimate correlation at different levels we use the interclass correlation coefficient ICC as given in @wolakGuidelinesEstimatingRepeatability2012 and following the implementation of @yuTestANOVAApplications2022.
 
 ```{r}
 library("dplyr")
@@ -352,38 +333,63 @@ computeIccAnalysis <- function(data, stages, clusterVars, obsVar) {
 
 ```
 
+Let's investigate the metrics in our dataset. We also use transformation of the metrics to see how the scale affects the ICC.
 
 ```{r}
 stages <- c("Onset", "Non-diabetic", "Long-duration")
 clusterVars <- c("image_name", "patient_id")
+```
 
+## Area
+
+```{r}
 allIslets$sqrtArea <- sqrt(allIslets$Area)
 allIslets$log10Area <- log10(allIslets$Area)
+```
 
-
+### Untransformed
+```{r}
 computeIccAnalysis(allIslets, stages, clusterVars, "Area")
+```
+
+### Square-root transformed
+
+```{r}
 computeIccAnalysis(allIslets, stages, clusterVars, "sqrtArea")
+```
+
+### Log-transformed 
+```{r}
 computeIccAnalysis(allIslets, stages, clusterVars, "log10Area")
 ```
+
+## Proportion of beta cells
+
 ```{r}
 allIslets$prop_beta_trans <- asin(allIslets$prop_beta)
+```
 
+### Untransformed
+```{r}
 computeIccAnalysis(allIslets, stages, clusterVars, "prop_beta")
+```
+
+### Arcsin-transformed
+
+```{r}
 computeIccAnalysis(allIslets, stages, clusterVars, "prop_beta_trans")
 ```
 
+Overall, we can see there there are varying degress of ICC on both image and patient level. Second, transformation of the outcome does not influence ICC much.
 
 # Simulation for patient and slide effect
 
-Code adapted from Yu et al. (2021) DOI:10.1016/j.neuron.2021.10.030
-
+To investigate the impact on modeling we adapt code from @yuTestANOVAApplications2022. We compare how ICC affects modeling using linear models, where all observation are treated as independent, compared to linear mixed-effects models were we group level effects are estimated and accounted for at different levels.
 
 ```{r}
-library("MASS")
-library("nlme")
-
 simulateLmeVsLm <- function(designDf, iccN1, iccN2, iccN3, 
-                            B = 100, alpha = 0.05, plotResults = TRUE, seed = 421) {
+                            B = 100, alpha = 0.05,
+                            plotResults = TRUE, seed = 421) {
   set.seed(seed)
 
   # Extract counts per stage
@@ -402,7 +408,7 @@ simulateLmeVsLm <- function(designDf, iccN1, iccN2, iccN3,
   pLmNull <- matrix(0, B, 5)
   pLmeNull <- matrix(0, B, 5)
 
-  # Begin simulation loop
+  # Begin simulation
   for (b in 1:B) {
     y <- numeric(0)
 
@@ -450,7 +456,7 @@ simulateLmeVsLm <- function(designDf, iccN1, iccN2, iccN3,
   cat("Type I error rate of LME at α =", alpha, ":\n")
   print(lmeType1Error)
 
-  # Optional plotting
+  # Plotting
   if (plotResults) {
     par(mfrow = c(1, 2))
 
@@ -458,14 +464,18 @@ simulateLmeVsLm <- function(designDf, iccN1, iccN2, iccN3,
     h1$density <- h1$counts / sum(h1$counts) * 100
     plot(h1, freq = FALSE, xlab = "", ylab = "Proportion (%)",
          main = "Histogram of LM p-values", ylim = c(0, 100), xlim = c(0, 1))
+    abline(v = 0.05, col = "navy", lwd = 2, lty = 2)
+
 
     h2 <- hist(pLmeNull[, 1], breaks = 20, plot = FALSE)
     h2$density <- h2$counts / sum(h2$counts) * 100
     plot(h2, freq = FALSE, xlab = "", ylab = "Proportion (%)",
          main = "Histogram of LME p-values", ylim = c(0, 100), xlim = c(0, 1))
+    abline(v = 0.05, col = "navy", lwd = 2, lty = 2)
+
   }
 
-  # Return results
+  # Results
   return(list(
     pLmNull = pLmNull,
     pLmeNull = pLmeNull,
@@ -476,43 +486,80 @@ simulateLmeVsLm <- function(designDf, iccN1, iccN2, iccN3,
 
 ```
 
-
 ```{r}
-# Construct designDf
+# Construct designDf as input to function above
 designDf <- allIslets |>
   sf::st_drop_geometry() |>
   dplyr::select(patient_id, patient_stage, image_name) |>
   dplyr::group_by(patient_id, patient_stage, image_name) |>
   dplyr::summarise(n = dplyr::n(), .groups = "drop")
+```
 
-# Call the function
-results <- simulateLmeVsLm(
+```{r}
+# Number of simulations
+nSim <- 1000
+```
+
+# Area
+
+We assume ICC is additive for patient and group level.
+
+```{r}
+set.seed(123)
+
+resArea <- simulateLmeVsLm(
   designDf = designDf,
   iccN1 = 0.01908158 + 0.27264726,
   iccN2 = 0.17514179 + 0.27600049,
   iccN3 = 0.02250608 + 0.35758017,
-  B = 1000,
+  B = nSim,
   alpha = 0.05,
   plotResults = TRUE
 )
 ```
 
-# Dependence on ICC
+As we can see, linear models have an inflated false discovery rate while the linear mixed effect models have a well calibrated FDR.
+
+# Beta cells
+
+We assume ICC is additive for patient and group level. Note that we took the absolute value of the ICCs.
+
 
 ```{r}
+set.seed(321)
+
+resBeta <- simulateLmeVsLm(
+  designDf = designDf,
+  iccN1 = 0.751485647 + 0.405180113,
+  iccN2 = 0.287959123 + 0.213844664,
+  iccN3 =  0.339234925 + 0.003473021,
+  B = nSim,
+  alpha = 0.05,
+  plotResults = TRUE
+)
+```
+
+Again, linear models have an inflates false discovery rate. As the ICC are overall larger, the effect is even stronger than for metric "area".
+
+# Dependence on ICC
+
+Finally, we want to see how much ICC of one level affects the outcome. Therefore we simulate dependence of ICC for each group.
+
+```{r}
+#| eval: false
 library(dplyr)
 library(purrr)
 library(tidyr)
 library(tibble)
 
-# 1. Construct designDf
+# Construct designDf
 designDf <- allIslets |>
   sf::st_drop_geometry() |>
   dplyr::select(patient_id, patient_stage, image_name) |>
   group_by(patient_id, patient_stage, image_name) |>
   summarise(n = n(), .groups = "drop")
 
-# 2. Create ICC grid (e.g. 0 to 1 in steps of 0.1)
+# Create ICC grid
 iccVals <- seq(0, 1, length.out = 8)
 iccGrid <- expand.grid(
   iccN1 = iccVals,
@@ -520,7 +567,7 @@ iccGrid <- expand.grid(
   iccN3 = iccVals
 )
 
-# 3. Wrapper to run simulations and collect errors
+# Wrapper to run simulations and collect errors
 simulateGridRow <- function(row, designDf, B = 100, alpha = 0.05) {
   res <- simulateLmeVsLm(
     designDf = designDf,
@@ -540,7 +587,7 @@ simulateGridRow <- function(row, designDf, B = 100, alpha = 0.05) {
   )
 }
 
-# 4. Run simulations for all ICC combinations
+# Run simulations for all ICC combinations
 simulationResults <- purrr::pmap_dfr(
   iccGrid,
   ~ simulateGridRow(
@@ -551,12 +598,22 @@ simulationResults <- purrr::pmap_dfr(
     )
 )
 
-# 5. View or analyze results
-print(simulationResults)
-
+# View or analyze results
+head(simulationResults)
 ```
 
-# Visualize
+
+```{r}
+#| eval: false
+#| include: false
+saveRDS(simulationResults, "../outs/imc-islets/simResLM.rds")
+```
+
+```{r}
+#| include: false
+simulationResults <- readRDS("../outs/imc-islets/simResLM.rds")
+```
+
 
 ```{r}
 #| fig-width: 15
@@ -574,209 +631,222 @@ round(simulationResults, 2) |>
     theme_light()
 ```
 
+This plot should be interpreted as follows, the facets on the x axis correspond to ICC of group one, the facets on the y axis of group two and the actual x axis for group three.
 
-```{r}
-saveRDS(simulationResults, "../../outs/imc-islets/simResLM.rds")
-```
+Overall, we can see that already if the ICC of one group increses, the FDR (y-axis) increases when using linear models.
 
+# Conclusion
 
+Given our simulations we conclude that linear mixed effects models can account well for correlation at different levels, if correctly specified. 
 
-
-
-
-
-```{r}
-library(MASS)   
-library(nlme)   
-
-set.seed(421)   
-B <- 1000
-
-# Pre-allocate p-value matrices
-p.lm.null <- matrix(0, B, 5)
-p.lme.null <- matrix(0, B, 5)
+<!-- ## Area  -->
 
 
-icc.n1 <- 0.01908158 + 0.27264726  
-icc.n2 <- 0.17514179 + 0.27600049
-icc.n3 <- 0.02250608 + 0.35758017
+<!-- ```{r} -->
+<!-- library(MASS)    -->
+<!-- library(nlme)    -->
 
-# Begin simulation loop
-for (b in 1:B) {
-  y <- NULL 
+<!-- set.seed(123)    -->
+<!-- B <- 1000 -->
 
-  ncells <- n1
-  for (j in 1:length(ncells)) {
-    # Build compound symmetric covariance matrix with ICC
-    mysigma <- diag(ncells[j]) + 
-               matrix(icc.n1, ncells[j], 1) %*% 
-               matrix(icc.n1, 1, ncells[j])
-    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
-  }
-
-  ncells <- n2
-  for (j in 1:length(ncells)) {
-    mysigma <- diag(ncells[j]) +
-               matrix(icc.n2, ncells[j], 1) %*%
-               matrix(icc.n2, 1, ncells[j])
-    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
-  }
-
-  ncells <- n3
-  for (j in 1:length(ncells)) {
-    mysigma <- diag(ncells[j]) +
-               matrix(icc.n3, ncells[j], 1) %*%
-               matrix(icc.n3, 1, ncells[j])
-    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
-  }
+<!-- # Pre-allocate p-value matrices -->
+<!-- p.lm.null <- matrix(0, B, 5) -->
+<!-- p.lme.null <- matrix(0, B, 5) -->
 
 
-  # Assemble the simulated dataset
-  Ex1.sim <- data.frame(
-    res = y,
-    treatment_idx = Ex1$treatment_idx,
-    pidx = Ex1$pidx,
-    imix = Ex1$imix
-  )
+<!-- icc.n1 <- 0.01908158 + 0.27264726   -->
+<!-- icc.n2 <- 0.17514179 + 0.27600049 -->
+<!-- icc.n3 <- 0.02250608 + 0.35758017 -->
 
-  # Fit Linear Mixed Effects Model (LME)
-  obj.lme <- lme(res ~ treatment_idx, data = Ex1.sim,
-                 random = list(pidx=~1, imix=~1), method = "ML")
-  p.lme.null[b, 1] <- anova(obj.lme)[2, 4]             # Overall F-test
-  p.lme.null[b, 2:5] <- coef(summary(obj.lme))[-1, 5]  # Group comparisons
+<!-- # Begin simulation loop -->
+<!-- for (b in 1:B) { -->
+<!--   y <- NULL  -->
 
-  # Fit Ordinary Linear Model (LM)
-  obj.lm <- lm(res ~ treatment_idx, data = Ex1.sim)
-  p.lm.null[b, 1] <- anova(obj.lm)[1, 5]               # Overall F-test
-  p.lm.null[b, 2:5] <- coef(summary(obj.lm))[-1, 4]    # Group comparisons
-}
-```
+<!--   ncells <- n1 -->
+<!--   for (j in 1:length(ncells)) { -->
+<!--     # Build compound symmetric covariance matrix with ICC -->
+<!--     mysigma <- diag(ncells[j]) +  -->
+<!--                matrix(icc.n1, ncells[j], 1) %*%  -->
+<!--                matrix(icc.n1, 1, ncells[j]) -->
+<!--     y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma)) -->
+<!--   } -->
 
+<!--   ncells <- n2 -->
+<!--   for (j in 1:length(ncells)) { -->
+<!--     mysigma <- diag(ncells[j]) + -->
+<!--                matrix(icc.n2, ncells[j], 1) %*% -->
+<!--                matrix(icc.n2, 1, ncells[j]) -->
+<!--     y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma)) -->
+<!--   } -->
 
-```{r}
-# Output Type I Error Rates
-cat("Type I error rate of LM at α = 0.05:\n")
-print(mean(p.lm.null[,1] < 0.05))
-
-cat("Type I error rate of LME at α = 0.05:\n")
-print(mean(p.lme.null[,1] < 0.05))
-
-# Plot Histograms of p-values
-par(mfrow = c(1, 2))
-
-# LM p-value distribution
-h <- hist(p.lm.null[,1], nclass = 20, plot = FALSE)
-h$density <- h$counts / sum(h$counts) * 100
-plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)",
-     main = "Histogram of LM p-values", ylim = c(0, 100), xlim = c(0, 1))
-
-# LME p-value distribution
-h <- hist(p.lme.null[,1], nclass = 20, plot = FALSE)
-h$density <- h$counts / sum(h$counts) * 100
-plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)",
-     main = "Histogram of LME p-values", ylim = c(0, 100), xlim = c(0, 1))
-
-```
-## Beta cells
-
-```{r}
-library(MASS)   
-library(nlme)   
-
-set.seed(421)   
-B <- 1000
-
-# Pre-allocate p-value matrices
-p.lm.null <- matrix(0, B, 5)
-p.lme.null <- matrix(0, B, 5)
+<!--   ncells <- n3 -->
+<!--   for (j in 1:length(ncells)) { -->
+<!--     mysigma <- diag(ncells[j]) + -->
+<!--                matrix(icc.n3, ncells[j], 1) %*% -->
+<!--                matrix(icc.n3, 1, ncells[j]) -->
+<!--     y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma)) -->
+<!--   } -->
 
 
-icc.n1 <- 0.751485647 + 0.405180113	  
-icc.n2 <- 0.287959123 + 0.213844664
-icc.n3 <- -0.339234925 + -0.003473021
+<!--   # Assemble the simulated dataset -->
+<!--   Ex1.sim <- data.frame( -->
+<!--     res = y, -->
+<!--     treatment_idx = Ex1$treatment_idx, -->
+<!--     pidx = Ex1$pidx, -->
+<!--     imix = Ex1$imix -->
+<!--   ) -->
 
-# Begin simulation loop
-for (b in 1:B) {
-  y <- NULL 
+<!--   # Fit Linear Mixed Effects Model (LME) -->
+<!--   obj.lme <- lme(res ~ treatment_idx, data = Ex1.sim, -->
+<!--                  random = list(pidx=~1, imix=~1), method = "ML") -->
+<!--   p.lme.null[b, 1] <- anova(obj.lme)[2, 4]             # Overall F-test -->
+<!--   p.lme.null[b, 2:5] <- coef(summary(obj.lme))[-1, 5]  # Group comparisons -->
 
-  ncells <- n1
-  for (j in 1:length(ncells)) {
-    # Build compound symmetric covariance matrix with ICC
-    mysigma <- diag(ncells[j]) + 
-               matrix(icc.n1, ncells[j], 1) %*% 
-               matrix(icc.n1, 1, ncells[j])
-    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
-  }
-
-  ncells <- n2
-  for (j in 1:length(ncells)) {
-    mysigma <- diag(ncells[j]) +
-               matrix(icc.n2, ncells[j], 1) %*%
-               matrix(icc.n2, 1, ncells[j])
-    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
-  }
-
-  ncells <- n3
-  for (j in 1:length(ncells)) {
-    mysigma <- diag(ncells[j]) +
-               matrix(icc.n3, ncells[j], 1) %*%
-               matrix(icc.n3, 1, ncells[j])
-    y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma))
-  }
+<!--   # Fit Ordinary Linear Model (LM) -->
+<!--   obj.lm <- lm(res ~ treatment_idx, data = Ex1.sim) -->
+<!--   p.lm.null[b, 1] <- anova(obj.lm)[1, 5]               # Overall F-test -->
+<!--   p.lm.null[b, 2:5] <- coef(summary(obj.lm))[-1, 4]    # Group comparisons -->
+<!-- } -->
+<!-- ``` -->
 
 
-  # Assemble the simulated dataset
-  Ex1.sim <- data.frame(
-    res = y,
-    treatment_idx = Ex1$treatment_idx,
-    pidx = Ex1$pidx,
-    imix = Ex1$imix
-  )
+<!-- ```{r} -->
+<!-- # Output Type I Error Rates -->
+<!-- cat("Type I error rate of LM at α = 0.05:\n") -->
+<!-- print(mean(p.lm.null[,1] < 0.05)) -->
 
-  # Fit Linear Mixed Effects Model (LME)
-  obj.lme <- lme(res ~ treatment_idx, data = Ex1.sim,
-                 random = list(pidx=~1, imix=~1), method = "ML")
-  p.lme.null[b, 1] <- anova(obj.lme)[2, 4]             # Overall F-test
-  p.lme.null[b, 2:5] <- coef(summary(obj.lme))[-1, 5]  # Group comparisons
+<!-- cat("Type I error rate of LME at α = 0.05:\n") -->
+<!-- print(mean(p.lme.null[,1] < 0.05)) -->
 
-  # Fit Ordinary Linear Model (LM)
-  obj.lm <- lm(res ~ treatment_idx, data = Ex1.sim)
-  p.lm.null[b, 1] <- anova(obj.lm)[1, 5]               # Overall F-test
-  p.lm.null[b, 2:5] <- coef(summary(obj.lm))[-1, 4]    # Group comparisons
-}
-```
+<!-- # Plot Histograms of p-values -->
+<!-- par(mfrow = c(1, 2)) -->
+
+<!-- # LM p-value distribution -->
+<!-- h <- hist(p.lm.null[,1], nclass = 20, plot = FALSE) -->
+<!-- h$density <- h$counts / sum(h$counts) * 100 -->
+<!-- plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)", -->
+<!--      main = "Histogram of LM p-values", ylim = c(0, 100), xlim = c(0, 1)) -->
+
+<!-- # LME p-value distribution -->
+<!-- h <- hist(p.lme.null[,1], nclass = 20, plot = FALSE) -->
+<!-- h$density <- h$counts / sum(h$counts) * 100 -->
+<!-- plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)", -->
+<!--      main = "Histogram of LME p-values", ylim = c(0, 100), xlim = c(0, 1)) -->
+
+<!-- ``` -->
+<!-- ## Beta cells -->
+
+<!-- ```{r} -->
+<!-- designDf <- allIslets |> -->
+<!--   st_drop_geometry() |> -->
+<!--   dplyr::select(patient_id, patient_stage, image_name) |> -->
+<!--   group_by(patient_id, patient_stage, image_name) |> -->
+<!--   summarise(n = n(), .groups = "drop") -->
+
+<!-- n1 <- designDf[designDf$patient_stage == "Non-diabetic", ][["n"]] -->
+<!-- n2 <- designDf[designDf$patient_stage == "Onset", ][["n"]] -->
+<!-- n3 <- designDf[designDf$patient_stage == "Long-duration", ][["n"]] -->
+
+<!-- Ex1 <- data.frame( -->
+<!--   treatment_idx = rep(designDf$patient_stage, times = designDf$n), -->
+<!--   pidx          = rep(designDf$patient_id, times = designDf$n), -->
+<!--   imix          = rep(designDf$image_name, times = designDf$n) -->
+<!-- ) -->
+<!-- ``` -->
 
 
-```{r}
-# Output Type I Error Rates
-cat("Type I error rate of LM at α = 0.05:\n")
-print(mean(p.lm.null[,1] < 0.05))
+<!-- ```{r} -->
+<!-- library(MASS)    -->
+<!-- library(nlme)    -->
 
-cat("Type I error rate of LME at α = 0.05:\n")
-print(mean(p.lme.null[,1] < 0.05))
+<!-- set.seed(421)    -->
+<!-- B <- 1000 -->
 
-# Plot Histograms of p-values
-par(mfrow = c(1, 2))
+<!-- # Pre-allocate p-value matrices -->
+<!-- p.lm.null <- matrix(0, B, 5) -->
+<!-- p.lme.null <- matrix(0, B, 5) -->
 
-# LM p-value distribution
-h <- hist(p.lm.null[,1], nclass = 20, plot = FALSE)
-h$density <- h$counts / sum(h$counts) * 100
-plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)",
-     main = "Histogram of LM p-values", ylim = c(0, 100), xlim = c(0, 1))
 
-# LME p-value distribution
-h <- hist(p.lme.null[,1], nclass = 20, plot = FALSE)
-h$density <- h$counts / sum(h$counts) * 100
-plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)",
-     main = "Histogram of LME p-values", ylim = c(0, 100), xlim = c(0, 1))
+<!-- icc.n1 <- 0.751485647 + 0.405180113	   -->
+<!-- icc.n2 <- 0.287959123 + 0.213844664 -->
+<!-- icc.n3 <- -0.339234925 + -0.003473021 -->
 
-```
+<!-- # Begin simulation loop -->
+<!-- for (b in 1:B) { -->
+<!--   y <- NULL  -->
 
-# Dependence on ICC
+<!--   ncells <- n1 -->
+<!--   for (j in 1:length(ncells)) { -->
+<!--     # Build compound symmetric covariance matrix with ICC -->
+<!--     mysigma <- diag(ncells[j]) +  -->
+<!--                matrix(icc.n1, ncells[j], 1) %*%  -->
+<!--                matrix(icc.n1, 1, ncells[j]) -->
+<!--     y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma)) -->
+<!--   } -->
 
-```{r}
+<!--   ncells <- n2 -->
+<!--   for (j in 1:length(ncells)) { -->
+<!--     mysigma <- diag(ncells[j]) + -->
+<!--                matrix(icc.n2, ncells[j], 1) %*% -->
+<!--                matrix(icc.n2, 1, ncells[j]) -->
+<!--     y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma)) -->
+<!--   } -->
 
-```
+<!--   ncells <- n3 -->
+<!--   for (j in 1:length(ncells)) { -->
+<!--     mysigma <- diag(ncells[j]) + -->
+<!--                matrix(icc.n3, ncells[j], 1) %*% -->
+<!--                matrix(icc.n3, 1, ncells[j]) -->
+<!--     y <- c(y, mvrnorm(n = 1, mu = rep(0, ncells[j]), Sigma = mysigma)) -->
+<!--   } -->
+
+
+<!--   # Assemble the simulated dataset -->
+<!--   Ex1.sim <- data.frame( -->
+<!--     res = y, -->
+<!--     treatment_idx = Ex1$treatment_idx, -->
+<!--     pidx = Ex1$pidx, -->
+<!--     imix = Ex1$imix -->
+<!--   ) -->
+
+<!--   # Fit Linear Mixed Effects Model (LME) -->
+<!--   obj.lme <- lme(res ~ treatment_idx, data = Ex1.sim, -->
+<!--                  random = list(pidx=~1, imix=~1), method = "ML") -->
+<!--   p.lme.null[b, 1] <- anova(obj.lme)[2, 4]             # Overall F-test -->
+<!--   p.lme.null[b, 2:5] <- coef(summary(obj.lme))[-1, 5]  # Group comparisons -->
+
+<!--   # Fit Ordinary Linear Model (LM) -->
+<!--   obj.lm <- lm(res ~ treatment_idx, data = Ex1.sim) -->
+<!--   p.lm.null[b, 1] <- anova(obj.lm)[1, 5]               # Overall F-test -->
+<!--   p.lm.null[b, 2:5] <- coef(summary(obj.lm))[-1, 4]    # Group comparisons -->
+<!-- } -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- # Output Type I Error Rates -->
+<!-- cat("Type I error rate of LM at α = 0.05:\n") -->
+<!-- print(mean(p.lm.null[,1] < 0.05)) -->
+
+<!-- cat("Type I error rate of LME at α = 0.05:\n") -->
+<!-- print(mean(p.lme.null[,1] < 0.05)) -->
+
+<!-- # Plot Histograms of p-values -->
+<!-- par(mfrow = c(1, 2)) -->
+
+<!-- # LM p-value distribution -->
+<!-- h <- hist(p.lm.null[,1], nclass = 20, plot = FALSE) -->
+<!-- h$density <- h$counts / sum(h$counts) * 100 -->
+<!-- plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)", -->
+<!--      main = "Histogram of LM p-values", ylim = c(0, 100), xlim = c(0, 1)) -->
+
+<!-- # LME p-value distribution -->
+<!-- h <- hist(p.lme.null[,1], nclass = 20, plot = FALSE) -->
+<!-- h$density <- h$counts / sum(h$counts) * 100 -->
+<!-- plot(h, freq = FALSE, xlab = "", ylab = "Proportion (%)", -->
+<!--      main = "Histogram of LME p-values", ylim = c(0, 100), xlim = c(0, 1)) -->
+
+<!-- ``` -->
 
 
 ```{r}
@@ -784,4 +854,4 @@ sessionInfo()
 ```
 
 
-
+# References
