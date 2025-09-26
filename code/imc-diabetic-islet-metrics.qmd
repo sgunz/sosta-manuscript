@@ -2,14 +2,16 @@
 title: "Supplement to: Analysis of anatomical multi-cellular structures from spatial omics data using sosta"
 author: 
   - name: Samuel Gunz
-    affiliation:
-      - Department of Molecular Life Sciences and SIB Swiss Institute of Bioinformatics, University of Zurich, Zurich, Switzerland
+    affil-id: 1
   - name: Helena Crowell
-    affiliation:
-      - Centro Nacional de Análisis Genómico, Barcelona, Spain
+    affil-id: 2
   - name: Mark D. Robinson
-    affiliation:
-      - Department of Molecular Life Sciences and SIB Swiss Institute of Bioinformatics, University of Zurich, Zurich, Switzerland
+    affil-id: 1
+affiliations: 
+  - id: 1
+    name: Department of Molecular Life Sciences and SIB Swiss Institute of Bioinformatics, University of Zurich, Zurich, Switzerland
+  - id: 2
+    name: Centro Nacional de Análisis Genómico, Barcelona, Spain
 date:  last-modified
 bibliography: ../misc/sosta.bib
 format: 
@@ -37,7 +39,7 @@ sansfont: Helvetica
 #       code-line-numbers: true
 ---
 
-# Multi-sample multi-condition structure-based analysis
+# Multi-sample multi-condition structure-based\linebreak analysis
 
 Structure-based analysis in multi-sample multi-condition data adds a layer of complexity as we will illustrate in an analysis of a spatial proteomics imaging mass cytometry (IMC) dataset of @damondMapHumanType2019. This dataset characterizes pancreatic islets in the course of type-one diabetic progression across twelve patients and three conditions. As such it is serves as a good example for structure-based analysis as it contains well characterized anatomical structures, i.e., the islets, where their biology is well studied.
 
@@ -479,7 +481,6 @@ simulateLmeVsLm <- function(designDf, iccN1, iccN2, iccN3,
     lmeType1Error = lmeType1Error
   ))
 }
-
 ```
 
 ```{r}
@@ -520,7 +521,6 @@ As we can see, linear models have an inflated false discovery rate while the lin
 
 We assume ICC is additive for patient and group level. Note that we took the absolute value of the ICCs.
 
-
 ```{r}
 set.seed(321)
 
@@ -543,10 +543,10 @@ Finally, we want to see how much ICC of one level affects the outcome. Therefore
 
 ```{r}
 #| eval: false
-library(dplyr)
-library(purrr)
-library(tidyr)
-library(tibble)
+library("dplyr")
+library("purrr")
+library("tidyr")
+library("tibble")
 
 # Construct designDf
 designDf <- allIslets |>

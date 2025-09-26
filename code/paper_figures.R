@@ -67,10 +67,12 @@ im_df <- rasterize(im_df, dpi = 300)
 
 den_hist <- ggplot(
     filter(im_dd, .data$value > max(.data$value) / 250), aes(x = abs(.data$value))) +
-    geom_histogram(bins = 50) +
+    geom_histogram(bins = 50, aes(fill = .data$value > thres),
+                   show.legend = FALSE, alpha = 0.75) +
     labs(x = "pixel intensity") +
     theme_light() +
-    geom_vline(xintercept = thres, color = "seagreen") +
+    geom_vline(xintercept = thres, color = "firebrick", linewidth = 1.25) +
+    scale_fill_manual(values = c("grey70", "firebrick")) +
     theme_classic()
 den_hist
 
@@ -155,10 +157,10 @@ dist <- cbind(colData(sostaSPE), spatialCoords(sostaSPE)) |>
     as.data.frame() |>
     filter(imageName == "image1") |>
     ggplot(aes(x = x, y = y, color = minDist)) +
-    geom_point(size = 0.75) +
+    geom_point(size = 0.3) +
     coord_equal() +
     scale_color_gradient2(low = "blue", mid = "gray99", high = "red",
-                          name = "border\ndist.") +
+                          name = "dist.") +
     geom_sf(
         data = allStructs[allStructs$imageName == "image1",],
         fill = NA,
@@ -192,12 +194,14 @@ ggsave("misc/cellA.pdf", plot = cellA, width = 3, height = 3)
 ggsave("misc/cellA_cells.pdf", plot = cellA_cells, width = 3, height = 3)
 ggsave("misc/cellA_outs.pdf", plot = cellA_outs, width = 3, height = 3)
 
-ggsave("misc/cells.pdf", plot = cells, width = 3, height = 3)
-ggsave("misc/dist.pdf", plot = dist, width = 3, height = 3)
-ggsave("misc/area.pdf", plot = area, width = 3, height = 3)
-ggsave("misc/denim.pdf", plot = im_df, width = 3, height = 2.5)
-ggsave("misc/denhist.pdf", plot = den_hist, width = 2.75, height = 2.75)
+ggsave("misc/cells.pdf", plot = cells, width = 2, height = 1.75)
+ggsave("misc/dist.pdf", plot = dist, width = 2, height = 1.75)
+ggsave("misc/area.pdf", plot = area, width = 2, height = 1.75)
+ ggsave("misc/denim.pdf", plot = im_df, width = 2.75, height = 2.25)
+ggsave("misc/denhist.pdf", plot = den_hist, width = 2.25, height = 2.25)
 
 
- cells + cellA + dist
+(cellA_cells + cellA_outs) /
+    (im_df + den_hist)
 
+ cells

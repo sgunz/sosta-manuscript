@@ -604,7 +604,7 @@ res_MAS <- apply(aggMat, 1, function(x)
 
 
 ```{r}
-mine(aggMat["ENSG00000188976",], c(1:ncol(aggMat)))
+mine(aggMat["ENSG00000188976",], c(1:ncol(aggMat)))$MIC
 ```
 
 
@@ -1061,9 +1061,8 @@ length(sel)
 rowData(spe_sel_orient)[, "geneName"][grep("^IGK|JCHAIN|HLA", rowData(spe_sel_orient)[, "geneName"])]
 ```
 ```{r}
-rowData(spe)[, "geneName"][grep("DPA", rowData(spe)[, "geneName"])]
+rowData(spe_sel_orient)[, "geneName"][grep("MIC", rowData(spe_sel_orient)[, "geneName"])]
 ```
-
 
 ```{r}
 #| fig-width: 5
@@ -1082,7 +1081,7 @@ colnames(m)[30] <- "DZ"
 sel1 <- c("IGHD", "COTL1", "IGHM", "CIITA", "HLA-DPA1", "CD83",
           "CRIIP1","IGHA1", "MKI67", "TUBB", "TUBB4B", "TOP2A", "MHC1",
           "IGKC", "IGIP", "IGHA2", "IGHG1", "TUBB2A", "TUBB4B", "SRGN",
-          "JCHAIN")
+          "JCHAIN", "MICA", "MICB", "PSMB10")
 
 
 gene_names <- rownames(m)
