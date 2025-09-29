@@ -254,18 +254,18 @@ allIslets |>
   sf::st_drop_geometry() |> 
   mutate(log10Area = log10(Area)) |> 
   mutate("Beta cells (%)" = prop_beta) |> 
-  dplyr::select(patient_stage, patient_id,  c("log10Area", "Beta cells (%)")) |> 
+  dplyr::select(patient_stage, patient_id,
+                c("log10Area", "Beta cells (%)")) |> 
   pivot_longer(-c(patient_stage, patient_id)) |> 
   filter(name %in% c("log10Area", "Beta cells (%)")) |> 
-  ggplot(aes(x = as.factor(patient_id), y = value, fill = patient_stage)) + 
+  ggplot(aes(x = as.factor(patient_id),
+             y = value, fill = patient_stage)) + 
   geom_violin() + 
   geom_boxplot(aes(fill = NULL), width = 0.3) + 
   facet_grid(name ~ patient_stage, scales = "free") + 
-  #scale_x_discrete(guide = guide_axis(n.dodge = 2)) + 
   guides(fill = "none") + 
   theme_bw() + 
   scale_fill_manual(values = unname(pals::tol(n = 3))) +
-  theme_bw() +
   labs(y = "Metric", x = "Patient ID")
 ```
 
@@ -279,8 +279,10 @@ To estimate correlation at different levels we use the interclass correlation co
 library("dplyr")
 library("ICC")  
 
-computeIccAnalysis <- function(data, stages, clusterVars, obsVar) {
-  # Code source: Yu et al. (2021) https://DOI:10.1016/j.neuron.2021.10.030
+computeIccAnalysis <- function(data, stages,
+                               clusterVars, obsVar) {
+  # Code source: Yu et al. (2021):
+  # https://DOI:10.1016/j.neuron.2021.10.030
   # Ensure cluster variables are factors
   for (var in clusterVars) {
     data[[var]] <- as.factor(data[[var]])
@@ -351,7 +353,6 @@ computeIccAnalysis(allIslets, stages, clusterVars, "Area")
 ```
 
 ### Square-root transformed
-
 ```{r}
 computeIccAnalysis(allIslets, stages, clusterVars, "sqrtArea")
 ```
@@ -362,7 +363,6 @@ computeIccAnalysis(allIslets, stages, clusterVars, "log10Area")
 ```
 
 ## Proportion of beta cells
-
 ```{r}
 allIslets$prop_beta_trans <- asin(allIslets$prop_beta)
 ```
@@ -373,12 +373,11 @@ computeIccAnalysis(allIslets, stages, clusterVars, "prop_beta")
 ```
 
 ### Arcsin-transformed
-
 ```{r}
 computeIccAnalysis(allIslets, stages, clusterVars, "prop_beta_trans")
 ```
 
-Overall, we can see there there are varying degress of ICC on both image and patient level. Second, transformation of the outcome does not influence ICC much.
+Overall, we can see there there are varying degrees of ICC on both image and patient level. Transformation of the values can help to mitigate the effect of the ICC to some degree (e.g., log10 transformation of "area"), but there is still correlation present after transformation.
 
 # Simulation for patient and slide effect
 
@@ -499,9 +498,12 @@ nSim <- 1000
 
 # Area
 
-We assume ICC is additive for patient and group level.
+We assume ICC is additive for patient and group level. The values are taken from the results above.
 
 ```{r}
+#| fig-width: 8
+#| fig-height: 6
+
 set.seed(123)
 
 resArea <- simulateLmeVsLm(
@@ -522,6 +524,9 @@ As we can see, linear models have an inflated false discovery rate while the lin
 We assume ICC is additive for patient and group level. Note that we took the absolute value of the ICCs.
 
 ```{r}
+#| fig-width: 8
+#| fig-height: 6
+
 set.seed(321)
 
 resBeta <- simulateLmeVsLm(
