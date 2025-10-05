@@ -41,15 +41,15 @@ sansfont: Helvetica
 
 # Multi-sample multi-condition structure-based\linebreak analysis
 
-Structure-based analysis in multi-sample multi-condition data adds a layer of complexity as we will illustrate in an analysis of a spatial proteomics imaging mass cytometry (IMC) dataset of @damondMapHumanType2019. This dataset characterizes pancreatic islets in the course of type-one diabetic progression across twelve patients and three conditions. As such it is serves as a good example for structure-based analysis as it contains well characterized anatomical structures, i.e., the islets, where their biology is well studied.
+Structure-based analysis in multi-sample multi-condition data adds a layer of complexity, as we will illustrate in an analysis of a spatial proteomics imaging mass cytometry (IMC) dataset of @damondMapHumanType2019. This dataset characterizes pancreatic islets in the course of type-one diabetic progression across twelve patients and three conditions. As such, it serves as a good example for structure-based analysis since it contains well characterized anatomical structures, i.e., the islets, where their biology is well studied.
 
 We first use our point-pattern density reconstruction approach implemented in *sosta* [@gunzSostaPackageAnalysis2025] to reconstruct pancreatic islets and quantify corresponding biologically relevant features, ranging from geometric measures, such as the area of the islets to biologically relevant metrics such as the proportion of different cell types. To identify biologically relevant features, we then perform feature-wise differential analysis on the structure derived features. 
 
 Notably, two aspects of this dataset are characteristic of the challenges when performing differential analysis of structure-derived features. First, the different scale of different metrics. Structure-derived metrics can be positive-continuos (e.g., area), bound between zero and one (e.g., eccentricity) or discrete (e.g., number of observations within a structure). Note that some features can be represented differently, which impacts downstream modelling (e.g., cell types within a structures can be expressed both as fractions, i.e., bounded between 0 and 1, or using positive discrete values representing counts of cells).
 
-Second, the correlation structure of the dataset. Since the dataset contains multiple islets per slide, multiple slides per patient and multiple patients per condition, there are indeed multiple levels of correlation structure. Therefore, features derived from individual islet structures are not independent measurements. To quantify the correlation structure, we used the interclass correlation coefficient to measure correlation at different levels and generated simulations to assess the impacts of standard differential analysis. Not accounting for said correlation structure can be problematic and can lead to an inflated type I error (flase positive) rate. For more discussion on this problem and an introduction to both linear and linear mixed-effect models we refer the reader to @yuTestANOVAApplications2022. 
+Second, one should be mindful of the correlation structure. Since the dataset contains multiple islets per slide, multiple slides per patient and multiple patients per condition, there are indeed multiple levels of correlation structure. Therefore, features derived from individual islet structures are not independent measurements. To quantify the correlation structure, we used the interclass correlation coefficient to measure correlation at different levels and generated simulations to assess the impacts of standard differential analysis. Not accounting for such correlation structures can be problematic and can lead to an inflated type I error (false positive) rate. For more discussion on this problem and an introduction to both linear and linear mixed-effect models, we refer the reader to @yuTestANOVAApplications2022. 
 
-Notably, in the @damondMapHumanType2019 dataset failing to account for the correlation on slide and patient level led to a false discovery rate of up to 20 \% for certain metrics. Accounting for correlation using mixed-effects models however, helped to maintain the FDR below the desired 5\% level. 
+Notably, in the @damondMapHumanType2019 dataset, failing to account for the correlation on slide and patient level led to a false discovery rate of up to 20 \% for certain metrics. Accounting for correlation using mixed-effects models however, helped to maintain the FDR below the desired 5\% level. 
 
 All analyses are given below with inline code examples.
 
@@ -247,7 +247,7 @@ allIslets |>
     scale_color_manual(values=unname(pals::cols25(n = 16)))
 ```
 
-Let's inspect two metrics. Fraction of beta cells within each islet and the log10 transformed area of the islets.
+We first inspect two metrics: i) fraction of beta cells within each islet; and, ii) the log10 transformed area of the islets.
 
 ```{r}
 allIslets |> 
@@ -273,7 +273,7 @@ As we can see, there is variation at the patient and condition level.
 
 # Estimate Correlations using ICC 
 
-To estimate correlation at different levels we use the interclass correlation coefficient ICC as given in @wolakGuidelinesEstimatingRepeatability2012 and following the implementation of @yuTestANOVAApplications2022.
+To estimate correlation at different levels, we use the interclass correlation coefficient ICC as given in @wolakGuidelinesEstimatingRepeatability2012 and following the implementation of @yuTestANOVAApplications2022.
 
 ```{r}
 library("dplyr")
@@ -333,7 +333,7 @@ computeIccAnalysis <- function(data, stages,
 
 ```
 
-Let's investigate the metrics in our dataset. We also use transformation of the metrics to see how the scale affects the ICC.
+We can also transform the metrics to see how the scale affects the ICC.
 
 ```{r}
 stages <- c("Onset", "Non-diabetic", "Long-duration")
@@ -381,7 +381,7 @@ Overall, we can see there there are varying degrees of ICC on both image and pat
 
 # Simulation for patient and slide effect
 
-To investigate the impact on modeling we adapt code from @yuTestANOVAApplications2022. We compare how ICC affects modeling using linear models, where all observation are treated as independent, compared to linear mixed-effects models were we group level effects are estimated and accounted for at different levels.
+To investigate the impact on modeling, we adapt code from @yuTestANOVAApplications2022. We compare how ICC affects modeling using linear models, where all observation are treated as independent, compared to linear mixed-effects models where the group-level effects are estimated and accounted for at different levels.
 
 ```{r}
 simulateLmeVsLm <- function(designDf, iccN1, iccN2, iccN3, 
@@ -540,11 +540,11 @@ resBeta <- simulateLmeVsLm(
 )
 ```
 
-Again, linear models have an inflates false discovery rate. As the ICC are overall larger, the effect is even stronger than for metric "area".
+Again, linear models have an inflated false discovery rate. Since the ICC are overall larger, the effect is even stronger than for metric "area".
 
 # Dependence on ICC
 
-Finally, we want to see how much ICC of one level affects the outcome. Therefore we simulate dependence of ICC for each group.
+Finally, we want to see how much ICC of one level affects the outcome. Therefore, we simulate dependence of ICC for each group.
 
 ```{r}
 #| eval: false
@@ -632,13 +632,13 @@ round(simulationResults, 2) |>
     theme_light()
 ```
 
-This plot should be interpreted as follows, the facets on the x axis correspond to ICC of group one, the facets on the y axis of group two and the actual x axis for group three.
+This plot should be interpreted as follows: the facets on the x axis correspond to ICC of group one, the facets on the y axis of group two and the actual x axis for group three.
 
-Overall, we can see that already if the ICC of one group increses, the FDR (y-axis) increases when using linear models.
+Overall, we can see that already if the ICC of one group increases, the FDR (y-axis) increases when using linear models.
 
 # Conclusion
 
-Given our simulations we conclude that linear mixed effects models can account well for correlation at different levels, if correctly specified. 
+Given our simulations, we conclude that linear mixed effects models can account well for correlation at different levels, if correctly specified. 
 
 ```{r}
 sessionInfo()
