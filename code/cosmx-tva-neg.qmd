@@ -851,6 +851,7 @@ df |>
   labs(color = "") +
   scale_color_manual(values = typCols) +
   geom_smooth(method = "lm", color = "black") +
+  labs(x = "median shape index", y = "median trajectory") +
   guides(color=guide_legend(override.aes=list(size = 4))) -> q2
 ```
 
@@ -864,7 +865,7 @@ df |>
   reframe(medianTrj = median(trj), medianShape = median(shape), typ = typ) -> seltr
 
 
-cor.test(seltr$medianTrj, seltr$medianShape)
+cor.test(seltr$medianTrj, seltr$medianShape, method = "spearman")
 ```
 
 ```{r}
@@ -873,6 +874,9 @@ qsub <- q1 + q2 + q3
 ggsave("../misc/qsub.pdf", plot = qsub, width = 12, height = 4)
 ```
 
+```{r}
+ggsave("../misc/q2.pdf", plot = q2, width = 4, height = 3.5)
+```
 
 # Session Info
 
