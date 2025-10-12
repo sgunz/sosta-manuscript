@@ -1,3 +1,13 @@
+# Code repository – "Analysis of anatomical multi-cellular structures from spatial omics data using _sosta_"
+
+This repository contains code to reproduce analyses of the _sosta_ preprint. `sosta` is available from [Bioconductor](https://bioconductor.org/packages/sosta/).
+
+## Installing necessary R packages
+R packages are managed using `renv`. To install necessary R packages you can use `renv::restore()`.
+
+## Data
+All datasets used are publicly available. The CosMx TVA dataset is available at https://zenodo.org/records/15574384. The IMC pancreatic islets dataset is accessible through Bioconductor's `ExperimentHub` via the R package `imcdatasets`. The Visium HD human tonsil data is available from the [10x Genomics Datasets resource](https://www.10xgenomics.com/datasets/visium-hd-cytassist-gene-expression-libraries-human-tonsil-ff-ultima).
+
 # Session Info
 
 ```
