@@ -113,8 +113,10 @@ cbind(spatialCoords(spe), colData(spe)) |>
   labs(color = "") +
   scale_color_manual(values = typCols) +
   theme_void() +
-  theme(legend.position = "bottom")
-ggsave("../misc/slide110.pdf", width = 5, height = 2.85)
+  theme(legend.position = "bottom",
+        legend.spacing = grid::unit(0.1, "lines"),
+        legend.key.size = grid::unit(0.5, 'lines'))
+ggsave("../misc/slide110.pdf", width = 6.25, height = 4)
 ```
 
 
