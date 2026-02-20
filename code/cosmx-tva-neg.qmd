@@ -26,6 +26,7 @@ library("spdep")
 library("ggspavis")
 library("mumosa")
 library("patchwork")
+library("ggrepel")
 theme_set(theme_bw())
 ```
 
@@ -92,6 +93,21 @@ st_write(polygons, "../data/polygon/poly.shp")
 polygons <- st_read("../data/polygon/poly.shp")
 ```
 
+```{r}
+polygons$typ <- as.factor(polygons$typ)
+polygons$lv2 <- as.factor(polygons$lv2)
+```
+
+```{r}
+polygons$polyID <- polygons$cell
+
+df <- colData(spe) |> 
+  as.data.frame() |> 
+  tibble::rownames_to_column("polyID")
+
+polygons <- polygons |>
+  left_join(df, by = "polyID")
+```
 
 ```{r}
 colData(spe) |> 
@@ -450,32 +466,32 @@ psl |>
 
 ```{r}
 psl |>
-  mutate(epi_ref = rowSums(across(
-    c(
-      epi.EE,
-      epi.entero,
-      epi.goblet
-    )
-  ))) |>
-  mutate(epi_pat = rowSums(across(
-    c(`epi.goblet-like_REG4`,
-      `epi.entero-like_ACSF2`,
-      `epi.entero-like_EREG`,      
-      `epi.fetal-like_EMP1`,
-      `epi.fetal-like_MMP7`,
-      epi.inflam_REG1A,
-      `epi.paneth-like_DEFA6`,
-      epi.prolif,
-      epi.prolif_H1,
-      epi.prolif_STMN1,
-      epi.prolif_TACC3,
-      `epi.stem-like_CLU`,
-      `epi.stem-like_CLU`
-    )
-  ))) |>
-  mutate(epi_tot = epi_ref + epi_pat) |>
-  mutate(epi_ref_norm = epi_ref / (epi_ref + epi_pat)) |>
-  mutate(epi_pat_norm = epi_pat / (epi_ref + epi_pat))  -> psl
+    mutate(epi_ref = rowSums(across(c(
+        epi.EE, epi.entero, epi.goblet
+    )))) |>
+    mutate(epi_pat = rowSums(across(
+        c(
+            `epi.goblet-like_REG4`,
+            `epi.entero-like_ACSF2`,
+            `epi.entero-like_EREG`,
+            `epi.fetal-like_EMP1`,
+            `epi.fetal-like_MMP7`,
+            epi.inflam_REG1A,
+            `epi.paneth-like_DEFA6`,
+            epi.prolif,
+            epi.prolif_H1,
+            epi.prolif_STMN1,
+            epi.prolif_TACC3,
+            `epi.stem-like_CLU`,
+            `epi.stem-like_CLU`
+        )
+    ))) |>
+    mutate(epi_fetal = `epi.fetal-like_MMP7` + `epi.fetal-like_EMP1`) |> 
+    mutate(epi_prolif = epi.prolif + epi.prolif_H1 + 
+               epi.prolif_STMN1 + epi.prolif_TACC3) |> 
+    mutate(epi_tot = epi_ref + epi_pat) |>
+    mutate(epi_ref_norm = epi_ref / (epi_ref + epi_pat)) |>
+    mutate(epi_pat_norm = epi_pat / (epi_ref + epi_pat))  -> psl
 ```
 
 ```{r}
@@ -493,11 +509,18 @@ psl |>
 
 ```{r}
 psl |> 
-  filter(epi_tot > 0.5 & epi_ref_norm > 0.01  & epi_pat > 0.5 & ncells < 500) |> 
+  filter(epi_ref_norm > 0.01  & epi_pat > 0.5) |> 
+  filter(ncells > 10) |> 
   pull(cryptBorder) -> stsel
 ```
 
 ```{r}
+colData(spe) |>
+  as.data.frame() |> 
+  filter(!is.na(roi)) |> 
+  group_by(roi) |> 
+  summarize(n = n())
+
 length(stsel)
 
 colData(spe) |>
@@ -517,10 +540,11 @@ cbind(spatialCoords(spe), colData(spe)) |>
   as.data.frame() |> 
   dplyr::filter(cryptBorder %in% stsel) |> 
   ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = roi)) +
-  geom_point(size = 0.5, stroke = 0) + 
+  ggrastr::rasterise(geom_point(size = 0.1, stroke = 0)) + 
   coord_equal() +
   scale_color_manual(values = pals::okabe()) +
   guides(colour = guide_legend(override.aes = list(size=6)))
+ggsave("../outs/stsel0-trans-crypts.pdf", width = 15, height = 20)
 ```
 
 ```{r}
@@ -573,41 +597,58 @@ psl |>
 
 ```{r}
 psl |> 
-  filter(epi_tot > 0.5 & epi_ref_norm > 0.1 & epi_pat > 0.5 & ncells < 500) |> 
+  filter(epi_ref_norm > 0.1 & epi_pat > 0.5) |> 
   filter(ncells > 20 & ncells < 500) |> 
   pull(cryptBorder) -> stsel1
 ```
 
 ```{r}
+colData(spe) |>
+  as.data.frame() |> 
+  filter(cryptBorder %in% stsel1 & !is.na(roi)) |> 
+  group_by(roi) |> 
+  summarize(n = n())
+```
+```{r}
+
+plotCrypt <- function(spe, stsel2) {
+    df <- cbind(spatialCoords(spe), colData(spe)) |>
+        as.data.frame() |>
+        mutate(cryptCol = ifelse(cryptBorder %in% stsel2, "yes", "no"))
+    
+    # one row per label
+    labels_df <- df |>
+        filter(cryptBorder %in% stsel2) |>
+        distinct(cryptBorder, .keep_all = TRUE)
+    
+    p <- ggplot(df,
+           aes(x = CenterX_global_px, y = CenterY_global_px, 
+               color = cryptCol)) +
+        ggrastr::rasterise(geom_point(
+            size = 0.1,
+            stroke = 0,
+            show.legend = FALSE
+        )) +
+        geom_label_repel(
+            data = labels_df,
+            aes(label = cryptBorder),
+            size = 5,
+            color = "black",
+            show.legend = FALSE
+            
+        ) +
+        coord_equal() +
+        scale_color_manual(values = c("gray", "red3"))
+    return(p)
+}
+```
+
+
+```{r}
 #| fig-width: 20
 #| fig-height: 35
-cbind(spatialCoords(spe), colData(spe)) |>
-  as.data.frame() |> 
-  dplyr::filter(cryptBorder %in% stsel1) |> 
-  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px,
-             color = roi, label = cryptBorder)) +
-  geom_point(size = 0.5, stroke = 0) + 
-  coord_equal() +
-  scale_color_manual(values = pals::okabe()) +
-  guides(colour = guide_legend(override.aes = list(size=6))) +
-  geom_text(stat = 'identity', check_overlap = TRUE)
-```
-
-
-```{r}
-polygons$polyID <- polygons$cell
-
-df <- colData(spe) |> 
-  as.data.frame() |> 
-  tibble::rownames_to_column("polyID")
-
-polygons <- polygons |>
-  left_join(df, by = "polyID")
-```
-
-```{r}
-polygons$typ <- as.factor(polygons$typ)
-polygons$lv2 <- as.factor(polygons$lv2)
+plotCrypt(spe,stsel1)
+ggsave("../outs/stsel1-trans-crypts.pdf", width = 15, height = 20)
 ```
 
 ```{r}
@@ -704,30 +745,130 @@ polygons |>
 #| fig-width: 12
 #| figh-height: 8
 
-for (selim in stsel1) {
-  #cat(paste0('\n### ', selim, '\n\n'))
-  p <- polygons |>
-      dplyr::filter(cryptBorder %in% selim) |>
-      ggplot() +
-      geom_sf(aes(fill = lv2)) +
-      scale_fill_manual(values = lv2Cols) +
-      guides(colour = guide_legend(override.aes = list(size = 6))) +
-      theme_void()
-
-  q <- polygons |>
-      dplyr::filter(cryptBorder %in% selim) |>
-      ggplot() +
-      geom_sf(aes(fill = typ)) +
-      scale_fill_manual(values = typCols) +
-      guides(colour = guide_legend(override.aes = list(size = 6))) +
-      theme_void()
-  comb <- p + q + 
-  plot_annotation(title = paste("Crypt:", selim))
-  plot(comb)
-  #cat('\n\n')
+plotCryptPolys <- function(polygons, stsel1) {
+    plt_lys <- c()
+    
+    for (selim in stsel1) {
+        #cat(paste0('\n### ', selim, '\n\n'))
+        p <- polygons |>
+            dplyr::filter(cryptBorder %in% selim) |>
+            ggplot() +
+            geom_sf(aes(fill = lv2)) +
+            scale_fill_manual(values = lv2Cols) +
+            guides(colour = guide_legend(override.aes = list(size = 6))) +
+            theme_void()
+        
+        q <- polygons |>
+            dplyr::filter(cryptBorder %in% selim) |>
+            ggplot() +
+            geom_sf(aes(fill = typ)) +
+            scale_fill_manual(values = typCols) +
+            guides(colour = guide_legend(override.aes = list(size = 6))) +
+            theme_void()
+        comb <- p + q + plot_annotation(title = paste("Crypt:", selim))
+        
+        r <- polygons |>
+            dplyr::filter(cryptBorder %in% selim) |>
+            ggplot() +
+            geom_sf(aes(fill = lv2)) +
+            scale_fill_manual(values = lv2Cols) +
+            guides(colour = guide_legend(override.aes = list(size = 6))) +
+            labs(title = paste(selim)) +
+            theme_void()
+        
+        plt_lys <- c(plt_lys, r)
+        #cat('\n\n')
+    }
+    
+   return(wrap_plots(plt_lys, nrow = ceiling(length(plt_lys) / 4), ncol = 4))
 }
+
 ```
 <!-- ::: -->
+
+
+```{r}
+pltAll1 <- plotCryptPolys(polygons, stsel1)
+ggsave("../outs/stsel1-trans-crypts-polys.pdf", plot = pltAll, width = 30,
+       height = ceiling(length(pltAll1)/4)*30/6, limitsize = FALSE)
+```
+
+
+## Fetal and Prolif crypts
+
+### Fetal
+
+```{r}
+psl |> 
+  filter(epi_ref_norm > 0.1 & epi_fetal > 0.1) |> 
+  filter(ncells > 10) |> 
+  pull(cryptBorder) -> stsel2
+```
+
+```{r}
+colData(spe) |>
+  as.data.frame() |> 
+  filter(cryptBorder %in% stsel2) |> 
+  group_by(cryptBorder) |> 
+  summarize(n = n())
+
+colData(spe) |>
+  as.data.frame() |> 
+  filter(cryptBorder %in% stsel2 & !is.na(roi)) |> 
+  group_by(cryptBorder, roi) |> 
+  summarize(n = n())
+```
+
+```{r}
+#| fig-width: 20
+#| fig-height: 35
+plotCrypt(spe,stsel2)
+ggsave("../outs/fetal-trans-crypts.pdf", width = 15, height = 20)
+```
+
+```{r}
+pltAll2 <- plotCryptPolys(polygons, stsel2)
+ggsave("../outs/fetal-trans-crypts-polys.pdf", plot = pltAll2, width = 30,
+       height = ceiling(length(pltAll2)/4)*30/6, limitsize = FALSE)
+```
+
+### Prolif
+
+```{r}
+psl |> 
+  filter(epi_ref_norm > 0.2 & epi_prolif > 0.3) |> 
+  filter(ncells > 10) |> 
+  pull(cryptBorder) -> stsel3
+```
+
+```{r}
+colData(spe) |>
+  as.data.frame() |> 
+  filter(cryptBorder %in% stsel3) |> 
+  group_by(cryptBorder) |> 
+  summarize(n = n())
+
+colData(spe) |>
+  as.data.frame() |> 
+  filter(cryptBorder %in% stsel3 & !is.na(roi)) |> 
+  group_by(cryptBorder, roi) |> 
+  summarize(n = n())
+```
+
+```{r}
+#| fig-width: 20
+#| fig-height: 35
+plotCrypt(spe,stsel3)
+ggsave("../outs/prolif-trans-crypts.pdf", width = 20, height = 35)
+```
+
+```{r}
+pltAll3 <- plotCryptPolys(polygons, stsel3)
+ggsave("../outs/prolif-trans-crypts-polys.pdf", plot = pltAll3, width = 30,
+       height = ceiling(length(pltAll3)/4)*30/6, limitsize = FALSE)
+```
+
+## Plotting
 
 ```{r}
 #| fig-width: 6
