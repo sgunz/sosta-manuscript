@@ -1,0 +1,1421 @@
+---
+title: "sosta - Systematic Comparison"
+author: "Samuel Gunz"
+date:  last-modified
+format: 
+    html:
+      toc: true
+      code-fold: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+output-dir: "../docs/"
+---
+
+# Setup 
+```{r}
+#| message: false
+#| warning: false
+library("SpatialExperiment")
+library("sosta")
+library("ggplot2")
+library("tidyr")
+library("dplyr")
+library("sf")
+library("spdep")
+library("ggspavis")
+library("reticulate")
+library("imcRtools")
+library("purrr")
+library("terra")
+
+theme_set(theme_bw())
+```
+
+# Helper functions
+
+```{r}
+sf_to_binary_matrix <- function(polys,
+                                xmin, xmax,
+                                ymin, ymax,
+                                nrow, ncol) {
+  
+  # build raster template from user extent
+  r_template <- rast(
+    xmin  = xmin,
+    xmax  = xmax,
+    ymin  = ymin,
+    ymax  = ymax,
+    nrows = nrow,
+    ncols = ncol
+  )
+  
+  # assign value 1 to all polygons
+  polys_val <- polys |>
+    mutate(value = 1)
+  
+  # rasterize polygons to binary raster
+  r_bin <- polys_val |>
+    vect() |>
+    rasterize(
+      y          = r_template,
+      field      = "value",
+      background = 0
+    )
+  
+  # return binary matrix
+  as.matrix(r_bin, wide = TRUE)
+}
+
+# flip matrix in y direction
+flip_y <- function(mat) {
+  mat[nrow(mat):1, , drop = FALSE]
+}
+
+# rotate matrix 90 degrees clockwise
+rotate_90_cw <- function(mat) {
+  t(mat[nrow(mat):1, , drop = FALSE])
+}
+
+
+# Jaccard index for two binary matrices
+# A, B: matrices with values 0 or 1
+jaccard_binary <- function(A, B) {
+  # check dimensions
+  if (!all(dim(A) == dim(B))) {
+    stop("A and B must have the same dimensions")
+  }
+  
+  # convert to logical 1 = TRUE
+  A1 <- A == 1
+  B1 <- B == 1
+  
+  # intersection size
+  inter <- sum(A1 & B1)
+  
+  # union size
+  uni <- sum(A1 | B1)
+  
+  if (uni == 0) {
+    return(NA_real_)  # undefined if both empty
+  }
+  
+  return(inter / uni)
+}
+
+ashape_to_polygon <- function(ashape){
+  # Get the data, edges of the connected lines
+  data <-  ashape$edges[,c('x1','y1','x2','y2')]
+  # Create list of edges
+  result_list <- lapply(1:nrow(data), function(i) {
+    t(matrix(data[i,], ncol = 2))
+  })
+  # Create multilinestring that connects the edges
+  mls <- st_multilinestring(result_list)
+  poly <- st_polygonize(mls)
+  # Extract polygons from st collecion
+  ashape_poly <- st_collection_extract(poly, "POLYGON")
+  return(st_as_sf(st_sfc(ashape_poly)))
+}
+```
+
+# SPIAT helper functions
+
+```{r}
+library("alphahull")
+# adapted from https://github.com/TrigosTeam/SPIAT/blob/devel/R/identify_bordering_cells.R
+# in order to get a polygon for comparison.
+identify_bordering_cells_poly <- function(spe_object, reference_cell, 
+                                     feature_colname = "Cell.Type",
+                                     ahull_alpha = NULL,n_to_exclude = 10, 
+                                     plot_final_border = TRUE){
+    # CHECK
+    if (is.null(SummarizedExperiment::colData(spe_object)[,feature_colname])){
+        stop("Undefined column name. Please check if input contains `feature_colname`!")
+    }
+    if (!(reference_cell %in% 
+          SummarizedExperiment::colData(spe_object)[,feature_colname])){
+        stop("Reference cell not found!")
+    }
+    
+    coords_df <- data.frame(SpatialExperiment::spatialCoords(spe_object))
+    
+    ## draw boundaries
+    l <- list()
+    draw.polys <- data.frame("x" = c(max(coords_df$Cell.X.Position), 
+                                     max(coords_df$Cell.X.Position),
+                                     min(coords_df$Cell.X.Position), 
+                                     min(coords_df$Cell.X.Position)),
+                             "y" = c(min(coords_df$Cell.Y.Position), 
+                                     max(coords_df$Cell.Y.Position),
+                                     max(coords_df$Cell.Y.Position), 
+                                     min(coords_df$Cell.Y.Position)))
+    poly <- sp::Polygon(draw.polys, hole = FALSE)
+    l[[1]] <- poly
+    
+    polys <- sp::Polygons(l,ID = c("a"))
+    sp_obj <- sp::SpatialPolygons(list(polys))
+    
+    # for loop, get the boundary cells and inside cells for each polygon #####
+    data <- data.frame(SummarizedExperiment::colData(spe_object))
+    data <- cbind(data,data.frame(SpatialExperiment::spatialCoords(spe_object)))
+    data[,"Region"] <- "Outside"
+    
+    # get the coords
+    buffered_polygon <- methods::slot(sp_obj@polygons[[1]]@Polygons[[1]],
+                                      "coords")
+    
+    # identify the cells in the drawn polygon
+    inpolygon <- sp::point.in.polygon(
+        data$Cell.X.Position, data$Cell.Y.Position, buffered_polygon[, 1], 
+        buffered_polygon[, 2])
+    allcells_in_polygon <- data[which(inpolygon!= 0),
+                               c(feature_colname,"Cell.X.Position",
+                                 "Cell.Y.Position",feature_colname)]
+    tumour_in_polygon <- 
+        allcells_in_polygon[which(allcells_in_polygon[,feature_colname] == 
+                                      reference_cell),]
+    tumour_in_polygon <- unique(tumour_in_polygon)
+    
+    # ahull of the tumour cells
+    # define the value of alpha
+    requireNamespace("alphahull", quietly = TRUE)
+    if (is.null(ahull_alpha)){
+        n_cells <- dim(tumour_in_polygon)[1]
+        if (n_cells<200){
+            alpha <- 60} else if (n_cells > 5000){
+            alpha <- 90} else {
+            alpha <- (n_cells - 300)/160 + 60}
+        methods::show(paste("The alpha of Polygon is:", alpha))
+        ahull <- alphahull::ahull(tumour_in_polygon$Cell.X.Position,
+                                 tumour_in_polygon$Cell.Y.Position, 
+                                 alpha = alpha)
+    }
+    else {
+        ahull <- alphahull::ahull(tumour_in_polygon$Cell.X.Position,
+                                 tumour_in_polygon$Cell.Y.Position, 
+                                 alpha = ahull_alpha)
+    }
+    # fix ahull
+    resahull <- ahull
+    ahull <- fix_ahull(ahull)
+    # my polygon function
+    xahull <- ahull$xahull
+    arc <- ahull$arcs
+    ahull_polygon <- get_polygon(xahull,arc,n_to_exclude)
+    
+    # identify the cells that compose the ahull
+    border_ids <- c()
+    for (i in c(seq_len(length(ahull_polygon)))){
+        p <- data.frame(ahull_polygon[[i]])
+        colnames(p) <- c("Cell.X.Position","Cell.Y.Position")
+        
+        # find the bordering cells in the original dataset to find the IDs
+        common_cells <- dplyr::intersect(
+            data[,c("Cell.X.Position","Cell.Y.Position")],
+            p[,c("Cell.X.Position","Cell.Y.Position")])
+        border_ids <- c(border_ids, rownames(common_cells))}
+    
+    # identify the cells that are in the ahull
+    points_in_polygon <- data.frame()
+    for (i in c(seq_len(length(ahull_polygon)))){
+        p <- ahull_polygon[[i]]
+        in_p <- sp::point.in.polygon(allcells_in_polygon$Cell.X.Position, 
+                                     allcells_in_polygon$Cell.Y.Position, 
+                                     p[,1], p[,2])
+        points_in_polygon <- 
+            unique(rbind(
+                points_in_polygon, 
+                allcells_in_polygon[which(in_p == 1),
+                                    c(feature_colname, "Cell.X.Position",
+                                      "Cell.Y.Position",
+                                      feature_colname)]))}
+    points_in_polygon_df <- as.data.frame(points_in_polygon)
+    cells_in_boundary <- points_in_polygon_df
+    
+    in_border_ids <- rownames(cells_in_boundary)
+    data[in_border_ids,"Region"] <- "Inside"
+    data[border_ids,"Region"] <- "Border"
+
+    # plot and return #####
+    SummarizedExperiment::colData(spe_object)$Region <- data[,"Region"]
+    # check if bordering cells are detected and if plot the border
+    if (dim(data[which(data$Region=="Border"),])[1]!=0){
+        if (isTRUE(plot_final_border)){
+            plot(data[which(data$Region=="Border"), 
+                      c("Cell.X.Position","Cell.Y.Position")], 
+                 pch = 19, cex = 0.3, main = paste(attr(spe_object, "name"),
+                                                   "bordering cells"))}
+    }
+    else{
+        warning("There are no bordering cells detected when alpha = ", ahull_alpha)
+        }
+    # save the number of clusters identified
+    attr(spe_object, "n_of_clusters") <- length(ahull_polygon)
+    return(c(spe = spe_object, ahull = resahull))
+}
+
+# from: https://github.com/TrigosTeam/SPIAT/blob/d5dedad7fe4ae645940f3c80e6343347360b1618/R/utils.R#L65
+# fix the bug in `ahull` function from `alphahull` package
+fix_ahull <- function(ahull){ # the order of cells returned by ahull is messy
+    # this function reorders the cells
+    arc <- ahull$arcs
+    n_cells <- dim(arc)[1]
+    # copy the arc ends
+    ends <- arc
+    ends <- rbind(ends, ends[1,])
+    i <- 1
+    while (i < n_cells){
+        end2 <- ends[i,8]
+        next_end1 <- ends[i+1,7]
+        next_end2 <- ends[i+1,8]
+        while (end2 != next_end1){ # the connection breaks here
+            if (next_end2 == next_end1) {
+                # if the next cell is a loner cell, or the current cell is the last cell,
+                # the current cell does not have to be issue cell
+                i <- i+1
+                if (i >= (dim(arc)[1])) break
+                next_end1 <- arc[i+1,7]
+                next_end2 <- arc[i+1,8]
+            }
+            
+            else{ # the next cell is not loner cell, confirm the current cell is the issue cell
+                # break the current loop, go to next cell (skip loner cells)
+                for (j in (i+1):n_cells){
+                    t_end1 <- ends[j,7]
+                    t_end2 <- ends[j,8]
+                    # found the correct cell!
+                    if (t_end1 == end2 || t_end2 == end2){ 
+                        ends[n_cells+1,] <- ends[i+1,]
+                        ends[i+1,] <- ends[j,]
+                        ends[j,] <- ends[n_cells+1,]
+                    }
+                    if (t_end2 == end2){
+                        ends[i+1,8] <- t_end1
+                        ends[i+1,7] <- end2
+                    }
+                }
+                break
+            }
+        }
+        # next cell
+        i <- i+1
+    }
+    ends <- ends[-(n_cells+1),]
+    ahull$arcs <- ends
+    return(ahull)
+}
+
+# gets the coordinates of points on ahull
+get_polygon <- function(xahull, arc, n_to_exclude){ 
+    df_list <- list()
+    n <- 0
+    s <- 1
+    for (i in seq_len(dim(arc)[1]-1)){
+        if (arc[i,8] != arc[i+1,7]){
+            if (i-s > 4){
+                n <- n+1
+                df_list[[n]] <- arc[c(s:i),]
+            }
+            s <- i+1
+        }
+    }
+    if (length(df_list) == 0) df_list[[1]] <- arc
+    poly_list <- list()
+    c <- 0 
+    for (j in c(seq_len(length(df_list)))){
+        df <- df_list[[j]]
+        # eliminate the small tumour clusters (add later)
+        if (dim(df)[1] <= n_to_exclude){
+            next
+        }
+        else{
+            c <- c+1
+            cell_ID <- c()
+            locs <- c()
+            for (i in seq_len(dim(df)[1])){
+                cell_ID <- df[i,7]
+                locs <- rbind(locs,xahull[cell_ID,c(1,2)])
+            }
+            poly_list[[c]] <- locs
+        }
+    }
+    return(poly_list)
+}
+```
+
+# GRIDGENE parameters wrapper
+
+```{r}
+## -------------------------------------------------------------------
+## 2) GRIDGENE parameter grid wrapper (R + Python helper)
+## -------------------------------------------------------------------
+
+run_gridgene_param_grid <- function(
+    df,
+    true_mat,
+    param_grid,
+    side = 256L,
+    library_id = "image1",
+    mark_tum = "A"
+) {
+  # ensure integer grid
+  param_grid <- param_grid |>
+    dplyr::mutate(
+      kernel_size = as.integer(kernel_size),
+      density_th  = as.integer(density_th),
+      min_area    = as.integer(min_area)
+    )
+  
+  out_list <- vector("list", nrow(param_grid))
+  
+  for (i in seq_len(nrow(param_grid))) {
+    p <- param_grid[i, ]
+    
+    # call Python helper to get WKT polygons
+    wkt_vec <- tryCatch(
+      {
+        reticulate::py$gridgene_segment_to_wkt(
+          df,
+          library_id,
+          mark_tum,
+          p$kernel_size,
+          p$density_th,
+          p$min_area
+        )
+      },
+      error = function(e) character(0)
+    )
+    
+    if (length(wkt_vec) == 0L) {
+      # no polygons detected for this parameter combination
+      jac <- NA_real_
+    } else {
+      sfc_grid <- st_as_sfc(wkt_vec, crs = NA)
+      sf_grid  <- st_as_sf(
+        data.frame(id = seq_along(sfc_grid)),
+        geometry = sfc_grid
+      )
+      mask_grid <- sf_to_binary_matrix(
+        sf_grid, 0, side, 0, side, side, side
+      ) |>
+        rotate_90_cw()
+      
+      jac <- jaccard_binary(mask_grid, true_mat)
+    }
+    
+    out_list[[i]] <- dplyr::tibble(
+      kernel_size = p$kernel_size,
+      density_th  = p$density_th,
+      min_area    = p$min_area,
+      jaccard     = jac
+    )
+  }
+  
+  grid_res <- dplyr::bind_rows(out_list)
+  
+  # rows with at least one non NA Jaccard
+  non_na <- grid_res |>
+    dplyr::filter(!is.na(jaccard))
+  
+  if (nrow(non_na) == 0L) {
+    # no usable parameter set
+    best <- dplyr::tibble(
+      kernel_size = NA_integer_,
+      density_th  = NA_integer_,
+      min_area    = NA_integer_,
+      jaccard     = NA_real_
+    )
+  } else {
+    best <- non_na |>
+      dplyr::filter(jaccard == max(jaccard, na.rm = TRUE)) |>
+      dplyr::slice(1)
+  }
+  
+  return(
+    list(
+      grid = grid_res,
+      best = best
+    )
+  )
+}
+```
+
+# GRIDGENE Python helper
+
+```{python}
+# created by chatGPT
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from gridgene import get_arrays as ga
+from gridgene import contours as gg_contours
+from gridgene import get_masks as gg_masks
+
+
+def _plot_contour(ax, contour):
+    # shapely polygon
+    if hasattr(contour, "exterior"):
+        x, y = contour.exterior.xy
+        ax.plot(x, y, linewidth=2)
+        return
+
+    # numpy coordinates from gridgene, usually (row, col)
+    c = np.asarray(contour)
+    if c.ndim == 3 and c.shape[-2] == 1 and c.shape[-1] == 2:
+        c = c[:, 0, :]
+    if c.ndim != 2 or c.shape[1] != 2:
+        return
+
+    row = c[:, 0]
+    col = c[:, 1]
+    ax.plot(col, row, linewidth=2)  # plot as (x=col, y=row)
+
+
+def gridgene_segment_marks(
+    df: pd.DataFrame,
+    library_id: str = "image1",
+    mark_tum: str = "A",
+    kernel_size: int = 80,
+    density_th: int = 40,
+    min_area: int = 1000,
+    plot: bool = True,
+):
+    d = df[df["imageName"] == library_id].copy()
+
+    # GRIDGEN expects integer pixel coords in X, Y and labels in target
+    d["X"] = np.rint(d["x"]).astype(int)
+    d["Y"] = np.rint(d["y"]).astype(int)
+    d["target"] = d["marks"].astype(str)
+
+    # image arrays are (rows=Y, cols=X)
+    height = int(d["Y"].max() + 1)
+    width = int(d["X"].max() + 1)
+
+    target_dict = {t: i for i, t in enumerate(sorted(d["target"].unique()))}
+
+    array_total = ga.transform_df_to_array(
+        df=d,
+        target_dict=target_dict,
+        array_shape=(height, width, len(target_dict)),
+    ).astype(np.int8)
+
+    df_tum, array_tum, _ = ga.get_subset_arrays(
+        d,
+        array_total,
+        target_dict,
+        target_list=[mark_tum],
+        target_col="target",
+    )
+
+    CTum = gg_contours.ConvolutionContours(array_tum, contour_name=f"mark_{mark_tum}")
+    CTum.get_conv_sum(kernel_size=kernel_size, kernel_shape="square")
+    CTum.contours_from_sum(
+        density_threshold=density_th,
+        min_area_threshold=min_area,
+        directionality="higher",
+    )
+
+    CAll = gg_contours.ConvolutionContours(array_total, contour_name="all_marks")
+    CAll.get_conv_sum(kernel_size=kernel_size, kernel_shape="square")
+    CAll.contours_from_sum(
+        density_threshold=density_th,
+        min_area_threshold=min_area,
+        directionality="higher",
+    )
+
+    GM = gg_masks.GetMasks(image_shape=(height, width))
+    mask_all = GM.create_mask(CAll.contours)
+    mask_tum = GM.create_mask(CTum.contours)
+    mask_tum = GM.fill_holes(mask_tum)
+
+    if plot:
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+
+        # left. points colored by marks + contours
+        marks = d["target"].astype("category")
+        codes = marks.cat.codes
+        cats = marks.cat.categories
+
+        axs[0].scatter(
+            d["X"].to_numpy(),
+            d["Y"].to_numpy(),
+            c=codes,
+            s=3,
+            alpha=0.6,
+        )
+
+        for cat in cats:
+            axs[0].scatter([], [], label=cat)
+        axs[0].legend(title="marks")
+
+        for c in CTum.contours:
+            _plot_contour(axs[0], c)
+
+        axs[0].set_aspect("equal")
+        axs[0].set_title(f"Contours for mark {mark_tum}")
+
+        # right. masks in same coordinate system as scatter
+        extent = [0, width, 0, height]
+        axs[1].imshow(mask_all, alpha=0.5, origin="lower", extent=extent)
+        axs[1].imshow(mask_tum, alpha=0.5, origin="lower", extent=extent)
+        axs[1].set_aspect("equal")
+        axs[1].axis("off")
+        axs[1].set_title("Mask all and mask mark")
+
+        plt.show()
+
+    return {
+        "CTum": CTum,
+        "CAll": CAll,
+        "mask_tum": mask_tum,
+        "mask_all": mask_all,
+        "shape": (height, width),
+        "target_dict": target_dict,
+        "array_total": array_total,
+        "array_tum": array_tum,
+        "df_image": d,
+        "df_tum": df_tum,
+    }
+    
+from shapely.geometry import Polygon, MultiPolygon
+import numpy as np
+
+def contours_to_multipolygon(contours):
+    polys = []
+
+    for c in contours:
+        c = np.asarray(c)
+
+        # reshape if (N,1,2)
+        if c.ndim == 3 and c.shape[-2] == 1 and c.shape[-1] == 2:
+            c = c[:, 0, :]
+
+        if c.ndim != 2 or c.shape[1] != 2:
+            continue
+
+        # convert (row, col) -> (x=col, y=row)
+        height = res["shape"][0]
+        xy = np.column_stack([c[:,1], height - c[:,0]])
+
+        if len(xy) >= 3:
+            poly = Polygon(xy)
+            if poly.is_valid:
+                polys.append(poly)
+
+    return MultiPolygon(polys)
+
+from shapely.geometry import Polygon, MultiPolygon
+import numpy as np
+
+def contours_to_polygons(contours, height=None, flip_y=False,
+                         fix_invalid=True, min_vertices=3, min_area=0.0):
+    polys = []
+    skipped = []
+
+    for i, raw in enumerate(contours):
+        arr = np.asarray(raw)
+
+        # unify to a list of 2D arrays, each (N, 2)
+        parts = []
+
+        if arr.ndim == 2 and arr.shape[1] == 2:
+            parts = [arr]
+        elif arr.ndim == 3:
+            # shapes like (M, N, 2) or (M, N, 1, 2) flattened by caller
+            for p in arr:
+                p = np.asarray(p)
+                if p.ndim == 2 and p.shape[1] == 2:
+                    parts.append(p)
+                elif p.ndim == 3 and p.shape[-2] == 1 and p.shape[-1] == 2:
+                    parts.append(p[:, 0, :])
+        elif arr.ndim == 4 and arr.shape[-2] == 1 and arr.shape[-1] == 2:
+            # shapes like (M, N, 1, 2)
+            for p in arr:
+                parts.append(p[:, 0, :])
+
+        if not parts:
+            skipped.append((i, "no usable part"))
+            continue
+
+        for p in parts:
+            if p.shape[0] < min_vertices:
+                skipped.append((i, "too few vertices"))
+                continue
+
+            # row, col -> x, y
+            row = p[:, 0]
+            col = p[:, 1]
+
+            if flip_y and height is not None:
+                y = height - row
+            else:
+                y = row
+
+            xy = np.column_stack([col, y])
+
+            poly = Polygon(xy)
+
+            if not poly.is_valid and fix_invalid:
+                poly = poly.buffer(0)
+
+            if not poly.is_valid:
+                skipped.append((i, "invalid"))
+                continue
+
+            if poly.area < min_area:
+                skipped.append((i, "too small"))
+                continue
+
+            polys.append(poly)
+
+    return polys, skipped
+```
+
+
+```{python}
+# --------------------------------------------------------------------
+# 3) Python helper for GRIDGENE: return WKT for each polygon
+#    place in a Python chunk after the existing GRIDGENE code
+# --------------------------------------------------------------------
+from shapely.geometry import Polygon
+import numpy as np
+
+def gridgene_segment_to_wkt(
+    df,
+    library_id="image1",
+    mark_tum="A",
+    kernel_size=20,
+    density_th=15,
+    min_area=100
+):
+    """Run GRIDGENE and return a list of polygon WKT strings."""
+    # run main segmentation
+    res = gridgene_segment_marks(
+        df,
+        library_id=library_id,
+        mark_tum=mark_tum,
+        kernel_size=int(kernel_size),
+        density_th=int(density_th),
+        min_area=int(min_area),
+        plot=False
+    )
+    
+    height = res["shape"][0]
+    
+    polys_tum, skipped_tum = contours_to_polygons(
+        res["CTum"].contours,
+        height=height,
+        flip_y=False,
+        fix_invalid=True,
+        min_vertices=3,
+        min_area=0.0
+    )
+    
+    # return WKT list
+    return [p.wkt for p in polys_tum]
+```
+
+
+```{python}
+# created by chatGPT
+import numpy as np
+import pandas as pd
+import anndata as ad
+import squidpy as sq
+import cellcharter as cc
+import matplotlib.pyplot as plt
+
+def table_to_adata(df: pd.DataFrame) -> ad.AnnData:
+    df = df.copy()
+
+    # one row per cell
+    df.index = df.index.astype(str)
+
+    # minimal X so AnnData is valid
+    X = np.ones((df.shape[0], 1), dtype=np.float32)
+
+    adata = ad.AnnData(X=X)
+
+    # cell labels and image id
+    adata.obs["marks"] = df["marks"].astype("category")
+    adata.obs["imageName"] = df["imageName"].astype("category")
+
+    # spatial coordinates
+    adata.obsm["spatial"] = df[["x", "y"]].to_numpy(dtype=np.float32)
+    return adata
+```
+
+
+```{python}
+# --------------------------------------------------------------------
+# 4) Python helper for CellCharter: WKT boundaries
+#    place after CellCharter code
+# --------------------------------------------------------------------
+import numpy as np
+
+def cellcharter_boundaries_to_wkt(df, library_id="image1", mark_tum="A"):
+    """Return WKT polygons for CellCharter boundaries."""
+    # df -> AnnData as in your existing code
+    adata = table_to_adata(df)
+    
+    sq.gr.spatial_neighbors(
+        adata,
+        library_key='imageName',
+        coord_type='generic',
+        delaunay=True
+    )
+    
+    cc.gr.connected_components(adata, cluster_key='marks')
+    cc.tl.boundaries(adata, min_hole_area_ratio=0.01)
+    
+    boundaries = adata.uns["shape_component"]["boundary"]
+    
+    wkt_list = []
+    
+    for comp_id, poly in boundaries.items():
+        # keep only polygons for tumour mark if you need filtering
+        if hasattr(poly, "geom_type") and poly.geom_type in ("Polygon", "MultiPolygon"):
+            wkt_list.append(poly.wkt)
+    
+    return wkt_list
+```
+
+
+# Single Simulation
+
+```{r}
+# wrapper written using chatGPT
+## -------------------------------------------------------------------
+## 1) Single simulation + method wrapper
+## -------------------------------------------------------------------
+
+run_single_simulation <- function(
+    sim_id = 1L,
+    side = 256L,
+    n_blobs = 42L,
+    blob_sd = 11L,
+    lambda_A = 0.01,
+    lambda_B = 0.01,
+    noise_A = 0.005,
+    intCInA = 0.01,
+    intCInB = 0.01,
+    seed = NULL,
+    gridgene_param_grid = NULL,
+    library_id = "image1",
+    mark_tum = "A"
+) {
+  # optional reproducibility
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+  
+  ## ------------------------
+  ## simulate structure
+  ## ------------------------
+  tissueImage <- simulateTissueBlobs(
+    side,
+    n_blobs,
+    blob_sd
+  )
+  
+  poly_true <- binaryImageToSF(
+    tissueImage,
+    xmin = 0, xmax = side,
+    ymin = 0, ymax = side
+  )
+  
+  pointPattern <- createPointPatternTissue(
+    tissueImage,
+    lambda_A,
+    lambda_B,
+    noise_A,
+    intCInA,
+    intCInB
+  )
+  
+  df1 <- pointPattern |>
+    as.data.frame()
+  df1$imageName <- library_id
+  
+  tstSPE <- SpatialExperiment::SpatialExperiment(
+    colData = df1,
+    spatialCoordsNames = c("x", "y")
+  )
+  
+  ## ------------------------
+  ## true mask as matrix
+  ## ------------------------
+  true_mat <- tissueImage  # already binary matrix here
+  
+  ## ------------------------
+  ## helper: sf -> binary mask
+  ## ------------------------
+  sf_to_mask <- function(sf_obj) {
+    if (nrow(sf_obj) == 0L) {
+      return(matrix(0L, nrow = side, ncol = side))
+    }
+    mat <- sf_to_binary_matrix(sf_obj, 0, side, 0, side, side, side) |>
+      rotate_90_cw()
+    return(mat)
+  }
+  
+  ## ------------------------
+  ## sosta
+  ## ------------------------
+  res_sosta_sf <- reconstructShapeDensityImage(
+    tstSPE,
+    marks = "marks",
+    markSelect = mark_tum,
+    imageId = "image1",
+    imageCol = "imageName"
+  )
+  mask_sosta <- sf_to_mask(res_sosta_sf)
+  jac_sosta <- jaccard_binary(mask_sosta, true_mat)
+  
+  ## ------------------------
+  ## imcRtools
+  ## ------------------------
+  tstSPE_icr <- buildSpatialGraph(
+    tstSPE,
+    coords = c("x", "y"),
+    img_id = "imageName",
+    type = "expansion",
+    threshold = 10
+  )
+  
+  tstSPE_icr <- patchDetection(
+    tstSPE_icr,
+    coords = c("x", "y"),
+    patch_cells = tstSPE$marks == mark_tum,
+    colPairName = "expansion_interaction_graph",
+    expand_by = 5,
+    img_id = "imageName"
+  )
+  
+  p_icr <- patchSize(
+    tstSPE_icr,
+    coords = c("x", "y")
+  )
+  
+  res_imcr_sf <- st_as_sfc(p_icr$polygon) |>
+    st_as_sf()
+  
+  mask_imcr <- sf_to_mask(res_imcr_sf)
+  jac_imcr <- jaccard_binary(mask_imcr, true_mat)
+  
+  ## ------------------------
+  ## SPIAT (uses your helper functions)
+  ## ------------------------
+  colnames(spatialCoords(tstSPE)) <- c("Cell.X.Position", "Cell.Y.Position")
+  
+  res_spiat <- identify_bordering_cells_poly(
+    tstSPE,
+    reference_cell = mark_tum,
+    feature_colname = "marks",
+    plot_final_border = FALSE
+  )
+  
+  spiat_poly <- ashape_to_polygon(res_spiat$ahull.ashape.obj)
+  mask_spiat <- sf_to_mask(spiat_poly)
+  jac_spiat <- jaccard_binary(mask_spiat, true_mat)
+  
+  ## ------------------------
+  ## CellCharter (assumes Python code already run once)
+  ## Expect helper in Python: cellcharter_boundaries_to_wkt(df, library_id, mark_tum)
+  ## ------------------------
+  wkt_cc <- tryCatch(
+    {
+      reticulate::py$cellcharter_boundaries_to_wkt(
+        df1,
+        library_id,
+        mark_tum
+      )
+    },
+    error = function(e) character(0)
+  )
+  
+  if (length(wkt_cc) > 0L) {
+    sfc_cc <- st_as_sfc(wkt_cc, crs = NA)
+    sf_cc <- st_as_sf(
+      data.frame(id = seq_along(sfc_cc)),
+      geometry = sfc_cc
+    )
+    mask_cc <- sf_to_mask(sf_cc)
+    jac_cc <- jaccard_binary(mask_cc, true_mat)
+  } else {
+    jac_cc <- NA_real_
+  }
+  
+  ## ------------------------
+  ## GRIDGENE parameter scan
+  ## ------------------------
+  gridgene_result    <- NULL
+  jac_gridgene_best  <- NA_real_
+  best_kernel_size   <- NA_integer_
+  best_density_th    <- NA_integer_
+  best_min_area      <- NA_integer_
+  
+  if (!is.null(gridgene_param_grid)) {
+    gridgene_result <- run_gridgene_param_grid(
+      df         = df1,
+      true_mat   = true_mat,
+      param_grid = gridgene_param_grid,
+      side       = side,
+      library_id = library_id,
+      mark_tum   = mark_tum
+    )
+    
+    best_tbl <- gridgene_result$best
+    
+    if (nrow(best_tbl) > 0L && !is.na(best_tbl$jaccard[1])) {
+      jac_gridgene_best <- best_tbl$jaccard[1]
+      best_kernel_size  <- best_tbl$kernel_size[1]
+      best_density_th   <- best_tbl$density_th[1]
+      best_min_area     <- best_tbl$min_area[1]
+    }
+  }
+  
+  ## ------------------------
+  ## collect Jaccard scores
+  ## ------------------------
+  res_methods <- dplyr::tibble(
+    sim_id      = sim_id,
+    method      = c("sosta", "imcRtools", "SPIAT", "CellCharter", "GRIDGENE"),
+    jaccard     = c(
+      jac_sosta,
+      jac_imcr,
+      jac_spiat,
+      jac_cc,
+      jac_gridgene_best
+    ),
+    kernel_size = c(
+      NA_integer_, NA_integer_, NA_integer_, NA_integer_,
+      best_kernel_size
+    ),
+    density_th  = c(
+      NA_integer_, NA_integer_, NA_integer_, NA_integer_,
+      best_density_th
+    ),
+    min_area    = c(
+      NA_integer_, NA_integer_, NA_integer_, NA_integer_,
+      best_min_area
+    )
+  )
+  
+  ## ------------------------
+  ## return all objects
+  ## ------------------------
+  return(
+    list(
+      sim_id = sim_id,
+      params = list(
+        side = side,
+        n_blobs = n_blobs,
+        blob_sd = blob_sd,
+        lambda_A = lambda_A,
+        lambda_B = lambda_B,
+        noise_A = noise_A,
+        intCInA = intCInA,
+        intCInB = intCInB,
+        seed = seed
+      ),
+      tissueImage = tissueImage,
+      poly_true = poly_true,
+      df1 = df1,
+      tstSPE = tstSPE,
+      jaccard_table = res_methods,
+      gridgene_scan = gridgene_result
+    )
+  )
+}
+```
+
+
+# Run sims
+
+```{r}
+## -------------------------------------------------------------------
+## 5) Run many simulations and collect results
+## -------------------------------------------------------------------
+
+library("purrr")
+
+# define GRIDGENE parameter grid
+gridgene_param_grid <- tidyr::crossing(
+  kernel_size = c(1L, 20L, 40L, 60L, 80L, 100L),
+  density_th = c(1L, 10L, 15L, 20L, 50L, 75L),
+  min_area = c(1L, 20L, 50L, 100L, 200L)
+)
+
+# define simulation scenarios
+sim_grid <- tidyr::crossing(
+  sim_id = 1:4,
+  n_blobs = c(30L, 55L, 82L),
+  blob_sd = c(8L, 15L),
+  lambda_A = c(0.03, 0.04, 0.05, 0.07),
+  noise_A = c(0.001, 0.005, 0.01, 0.02)
+)
+
+# filter some low intensity high noise scenarios
+sim_grid <- sim_grid |> 
+  filter(!(lambda_A == 0.03 & (noise_A == 0.02 | noise_A == 0.01))) |> 
+  filter(!(lambda_A == 0.04 & noise_A == 0.02))
+```
+
+
+```{r}
+# run all simulations
+all_sims <- sim_grid |>
+  mutate(
+    res = purrr::pmap(
+      list(sim_id, n_blobs, blob_sd, lambda_A, noise_A),
+      function(sim_id, n_blobs, blob_sd, lambda_A, noise_A) {
+        run_single_simulation(
+          sim_id = sim_id,
+          side = 256L,
+          n_blobs = n_blobs,
+          blob_sd = blob_sd,
+          lambda_A = lambda_A,
+          noise_A = noise_A,
+          seed = 100 + sim_id,
+          gridgene_param_grid = gridgene_param_grid,
+          library_id = "image1",
+          mark_tum = "A"
+        )
+      }
+    )
+  )
+```
+
+```{r}
+saveRDS(all_sims, "../outs/eval-260304-1.rds")
+```
+
+# Evaluation
+
+```{r}
+## extract Jaccard table into one data frame
+jaccard_results <- all_sims |>
+  mutate(
+    jaccard_table = purrr::map(
+      res,
+      ~ dplyr::select(.x$jaccard_table, -sim_id)  # drop inner sim_id
+    )
+  ) |>
+  tidyr::unnest(jaccard_table)
+```
+
+
+```{r}
+jaccard_results |> 
+  mutate(jaccard_new = ifelse(is.na(jaccard), 0, jaccard)) |> 
+  ggplot(aes(x = method, y = jaccard_new, fill = method)) +
+  geom_violin(alpha = 0.7) +
+  geom_jitter(width = 0.1) +
+  scale_fill_manual(values = unname(pals::tol(5)))
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+## create a long data frame where GRIDGENE appears twice:
+## 1) best (from jaccard_results)
+## 2) all parameter combos (from gridgene_sweeps)
+
+# all non GRIDGENE methods
+df_other <- jaccard_results |>
+  filter(method != "GRIDGENE")
+
+# GRIDGENE best, just relabel
+df_gridgene_best <- jaccard_results |>
+  filter(method == "GRIDGENE") |>
+  mutate(method = "GRIDGENE_best")
+
+gridgene_sweeps <- all_sims |>
+  mutate(
+    grid = purrr::map(res, ~ .x$gridgene_scan$grid)
+  ) |>
+  dplyr::select(sim_id, n_blobs, blob_sd, lambda_A, noise_A, grid, res) |>
+  tidyr::unnest(grid)
+
+# GRIDGENE all parameter combinations
+# keep only columns needed for plotting
+df_gridgene_all <- gridgene_sweeps |>
+  transmute(
+    sim_id,
+    method      = "GRIDGENE_all",
+    jaccard,
+    kernel_size,
+    density_th,
+    min_area
+  )
+
+# bind everything
+df_plot <- bind_rows(
+  df_other,
+  df_gridgene_best,
+  df_gridgene_all
+)
+
+# replace NA Jaccard by 0 for plotting
+df_plot <- df_plot |>
+  mutate(
+    jaccard_new = ifelse(is.na(jaccard), 0, jaccard),
+    method      = factor(
+      method,
+      levels = c(
+        "sosta",
+        "imcRtools",
+        "SPIAT",
+        "CellCharter",
+        "GRIDGENE_best",
+        "GRIDGENE_all"
+      )
+    )
+  )
+```
+
+
+```{r}
+# plot, GRIDGENE_best vs GRIDGENE_all clearly separated
+df_plot |>
+  unique() |>
+  ggplot(aes(x = method, y = jaccard_new)) +
+  geom_violin(aes(fill = method), alpha = 0.7, trim = FALSE, show.legend = FALSE) +
+  #geom_jitter(width = 0.1, size = 0.5, alpha = 0.6, show.legend = FALSE) +
+  scale_fill_manual(values = unname(pals::cols25(6))) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust = 0.5)) +
+  geom_boxplot(width = 0.075) +
+  labs(x = "", y = "Jaccard index", fill = "") 
+```
+```{r}
+df_plot |>
+  group_by(method) |> 
+  summarise(mean_jaccard = mean(jaccard_new))
+
+df_plot |>
+  group_by(method) |> 
+  filter(!is.na(jaccard)) |> 
+  summarise(mean_jaccard = mean(jaccard_new))
+```
+
+```{r}
+df_tst <- df_plot |>
+  group_by(method) |> 
+  filter(!is.na(jaccard)) |> 
+  select(method, jaccard)
+
+m1 <- lm(jaccard ~ method, data = df_tst)
+summary(m1)  
+
+df_tst_2 <- df_plot |>
+  group_by(method) |> 
+  select(method, jaccard_new)
+
+m2 <- lm(jaccard_new ~ method, data = df_tst_2)
+summary(m2)  
+```
+
+
+```{r}
+df_plot |>
+  filter(method == "sosta") |>
+  filter(jaccard_new < 0.48)
+```
+
+
+```{r}
+r <- df_plot |>
+  filter(method == "sosta") |>
+  filter(jaccard_new < 0.48) |>
+  pull(res)
+```
+
+
+```{r}
+r[[1]][["poly_true"]] |> plot()
+```
+```{r}
+r[[1]][["df1"]] |>
+    as.data.frame() |>
+    ggplot(aes(x = x, y = y, color = marks)) +
+    geom_point(size = 1.5, stroke = 0) +
+    coord_equal() +
+    scale_color_manual(values = pals::okabe(4)[-1]) +
+    geom_sf(data = r[[1]][["poly_true"]], inherit.aes = FALSE, fill = NA,
+            linewidth = 0.5, color = "darkblue")
+```
+```{r}
+shapeIntensityImage(r[[1]][["tstSPE"]], marks = "marks", markSelect = "A")
+```
+
+```{r}
+ppp <- SPE2ppp(r[[1]][["tstSPE"]], marks = "marks")
+ppSel <- spatstat.geom::subset.ppp(ppp, marks %in% "A")
+
+(thrs <- findIntensityThreshold(ppp, markSelect = "A", dim = 250))
+```
+
+```{r}
+res_sosta_sf <- reconstructShapeDensityImage(
+  r[[1]][["tstSPE"]],
+  marks = "marks",
+  markSelect = "A",
+  imageId = "image1",
+  imageCol = "imageName",
+  thres =  thrs
+)
+```
+
+
+```{r}
+r[[1]][["df1"]] |>
+    as.data.frame() |>
+    ggplot(aes(x = x, y = y, color = marks)) +
+    geom_point(size = 1.5, stroke = 0) +
+    coord_equal() +
+    scale_color_manual(values = pals::okabe(4)[-1]) +
+    geom_sf(data = r[[1]][["poly_true"]], inherit.aes = FALSE,
+            fill = NA, linewidth = 0.5, color = "darkblue") +
+    geom_sf(data = res_sosta_sf, inherit.aes = FALSE, fill = NA, linewidth = 0.5, color = "red3")
+```
+
+```{r}
+sf_to_mask <- function(sf_obj) {
+  if (nrow(sf_obj) == 0L) {
+    return(matrix(0L, nrow = side, ncol = side))
+  }
+  mat <- sf_to_binary_matrix(sf_obj, 0, side, 0, side, side, side) |>
+    rotate_90_cw()
+  return(mat)
+}
+```
+
+```{r}
+side <- 256
+mask_sosta <- sf_to_mask(res_sosta_sf)
+jaccard_binary(mask_sosta, r[[1]][["tissueImage"]])
+```
+
+
+<!-- ```{r} -->
+<!-- densityImage <- .intensityImage(ppp, markSelect = "A", dim = 250)$denIm -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- steps <- 250 -->
+
+<!-- # take all densities greater than certain threshold due to numerical properties -->
+<!-- # of the density estimation -->
+<!-- denDf <- densityImage |> as.data.frame() -->
+<!-- newDen <- density(denDf$value[denDf$value > max(denDf$value) / steps]) -->
+<!-- # define the peaks x values -->
+<!-- peaks <- newDen$x[which(diff(sign(diff(newDen$y))) == -2)] -->
+<!-- # define peak values -->
+<!-- peakVals <- newDen$y[which(diff(sign(diff(newDen$y))) == -2)] -->
+<!-- peakVals <- peakVals /  max(newDen$y) -->
+
+<!-- plot(newDen) -->
+
+<!-- # filter very small values -->
+<!-- peaks <- peaks[peakVals > 0.05] -->
+
+<!-- minThres <- diff(range(newDen$x)) * 0.15 -->
+
+<!-- # The threshold is the mean between the two main modes of the distribution.  -->
+<!-- # If there is only one mode, this is the value. -->
+<!-- if (length(peaks) == 1) { -->
+<!--     thres <- peaks -->
+<!-- } else { -->
+<!--     thres <- (peaks[order(peaks, decreasing = FALSE)[2]] - -->
+<!--         peaks[order(peaks, decreasing = FALSE)[1]]) / 2 + -->
+<!--         peaks[order(peaks, decreasing = FALSE)[1]] -->
+<!-- } -->
+<!-- ``` -->
+
+<!-- # Visualization -->
+
+<!-- ```{r} -->
+<!-- set.seed(101) -->
+<!-- tissueImage <- simulateTissueBlobs(256, 55, 8) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- poly <- binaryImageToSF(tissueImage, xmin = 0, xmax = 256, -->
+<!--                 ymin = 0, ymax = 256) -->
+
+<!-- plot(poly) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- pointPattern1 <- createPointPatternTissue( -->
+<!--   tissueImage, -->
+<!--   intA = 0.03, -->
+<!--   intB = 0.01, -->
+<!--   noiseA = 0.01, -->
+<!--   intCInA = 0.01, -->
+<!--   intCInB = 0.01 -->
+<!-- ) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- pointPattern1 |>  -->
+<!--     as.data.frame() |>  -->
+<!--     ggplot(aes(x = x, y = y, color = marks)) + -->
+<!--     geom_point(size = 1.5, stroke = 0) + -->
+<!--     coord_equal() + -->
+<!--     scale_color_manual(values = pals::okabe(4)[-1]) + -->
+<!--     geom_sf(data = poly, inherit.aes = FALSE, fill = NA) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- df1 <- pointPattern1 |> -->
+<!--   as.data.frame() -->
+<!-- df1$imageName <- "image1" -->
+
+<!-- tstSPE <- SpatialExperiment::SpatialExperiment( -->
+<!--   colData = df1, -->
+<!--   spatialCoordsNames = c("x", "y") -->
+<!-- ) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- shapeIntensityImage(tstSPE, marks = "marks", markSelect = "A") -->
+<!-- ``` -->
+
+
+
+<!-- ```{r} -->
+<!-- res_sosta_sf <- reconstructShapeDensityImage( -->
+<!--   tstSPE, -->
+<!--   marks = "marks", -->
+<!--   markSelect = "A", -->
+<!--   imageId = "image1", -->
+<!--   imageCol = "imageName" -->
+<!-- ) -->
+
+<!-- side <- 256 -->
+<!-- mask_sosta <- sf_to_mask(res_sosta_sf) -->
+<!-- jaccard_binary(mask_sosta, tissueImage) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- pointPattern1 |>  -->
+<!--     as.data.frame() |>  -->
+<!--     ggplot(aes(x = x, y = y, color = marks)) + -->
+<!--     geom_point(size = 1.5, stroke = 0) + -->
+<!--     coord_equal() + -->
+<!--     scale_color_manual(values = pals::okabe(4)[-1]) + -->
+<!--     geom_sf(data = poly, inherit.aes = FALSE, fill = NA, linewidth = 0.5, color = "darkblue") + -->
+<!--     geom_sf(data = res_sosta_sf, inherit.aes = FALSE, fill = NA, linewidth = 0.5, color = "darkgreen") -->
+<!-- ``` -->
+
+
+
+
+
+

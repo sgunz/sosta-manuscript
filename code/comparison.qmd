@@ -164,7 +164,6 @@ jaccard_binary <- function(A, B) {
 
 ```{r}
 res_sosta <- sf_to_binary_matrix(res, 0, 256, 0, 256, 256, 256) |> rotate_90_cw()
-
 jaccard_binary(res_sosta, tissueImage)
 ```
 
@@ -474,6 +473,32 @@ plot(res_spiat$ahull.ashape.obj,
      asp = 1,
      col = c('darkblue', 'grey75'))
 ```
+```{r}
+ashape_to_polygon <- function(ashape){
+  # Get the data, edges of the connected lines
+  data <-  ashape$edges[,c('x1','y1','x2','y2')]
+  # Create list of edges
+  result_list <- lapply(1:nrow(data), function(i) {
+    t(matrix(data[i,], ncol = 2))
+  })
+  # Create multilinestring that connects the edges
+  mls <- st_multilinestring(result_list)
+  poly <- st_polygonize(mls)
+  # Extract polygons from st collecion
+  ashape_poly <- st_collection_extract(poly, "POLYGON")
+  return(st_as_sf(st_sfc(ashape_poly)))
+}
+
+
+spiat_poly <- ashape_to_polygon(res_spiat$ahull.ashape.obj)
+plot(spiat_poly)
+```
+```{r}
+res_bin_spiat <- sf_to_binary_matrix(spiat_poly, 0, 256, 0, 256, 256, 256) |>
+  rotate_90_cw()
+
+jaccard_binary(res_bin_spiat, tissueImage)
+```
 
 # Cell Charter
 
@@ -566,48 +591,34 @@ ax.set_aspect("equal")
 plt.show()
 ```
 
-## Subset Marks of interest `A`
+## Extract Python polygons
 
 ```{python}
-adata_A = adata[adata.obs["marks"].astype(str) == "A"].copy()
+from shapely.geometry import MultiPolygon, Polygon
+
+# collect all Polygon geometries
+polys = [v for v in boundaries.values() if isinstance(v, Polygon)]
+
+# build one MultiPolygon
+boundaries_mpoly = MultiPolygon(polys)
+type(boundaries_mpoly)
 ```
 
-Try smaller `min_hole_area_ratio` too. Only parameter to adjust.
 
-```{python}
-cc.gr.connected_components(adata_A, cluster_key='marks')
-cc.tl.boundaries(adata_A, min_hole_area_ratio=0.001)
+```{r}
+p0 <- py$boundaries_mpoly 
+print(p0)
+
+
+p0_poly <- st_as_sfc(p0$wkt) |> st_as_sf()
+plot(p0_poly)
 ```
 
-```{python}
-# created by chatGPT
-import matplotlib.pyplot as plt
-import numpy as np
+```{r}
+sf_cell_charter <- sf_to_binary_matrix(p0_poly, 0, 256, 0, 256, 256, 256) |>
+  rotate_90_cw()
 
-boundaries = adata_A.uns["shape_component"]["boundary"]
-coords = adata_A.obsm["spatial"]
-
-# categorical marks
-marks = adata_A.obs["marks"].astype("category")
-codes = marks.cat.codes
-categories = marks.cat.categories
-
-fig, ax = plt.subplots()
-
-# scatter colored by mark
-sc = ax.scatter(
-    coords[:, 0],
-    coords[:, 1],
-    s=5
-)
-
-# plot component boundaries
-for comp_id, poly in boundaries.items():
-    x, y = poly.exterior.xy
-    ax.plot(x, y, linewidth=2)
-
-ax.set_aspect("equal")
-plt.show()
+jaccard_binary(sf_cell_charter, tissueImage)
 ```
 
 # GRIDGENE
@@ -757,45 +768,166 @@ res = gridgene_segment_marks(
     library_id="image1",
     mark_tum="A",
     kernel_size=20,    
-    density_th=15,      
+    density_th=20,      
     min_area=100, 
     plot=True
 )
 ```
 
-## Extract Python polygons
+```{python}
+from shapely.geometry import Polygon, MultiPolygon
+import numpy as np
+
+def contours_to_multipolygon(contours):
+    polys = []
+
+    for c in contours:
+        c = np.asarray(c)
+
+        # reshape if (N,1,2)
+        if c.ndim == 3 and c.shape[-2] == 1 and c.shape[-1] == 2:
+            c = c[:, 0, :]
+
+        if c.ndim != 2 or c.shape[1] != 2:
+            continue
+
+        # convert (row, col) -> (x=col, y=row)
+        height = res["shape"][0]
+        xy = np.column_stack([c[:,1], height - c[:,0]])
+
+        if len(xy) >= 3:
+            poly = Polygon(xy)
+            if poly.is_valid:
+                polys.append(poly)
+
+    return MultiPolygon(polys)
+
+
+# tumor polygons
+mpoly_tum = contours_to_multipolygon(res["CTum"].contours)
+
+# all polygons
+mpoly_all = contours_to_multipolygon(res["CAll"].contours)
+
+type(mpoly_tum)
+```
 
 ```{python}
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import Polygon, MultiPolygon
+import numpy as np
 
-# collect all Polygon geometries
-polys = [v for v in boundaries.values() if isinstance(v, Polygon)]
+def contours_to_polygons(contours, height=None, flip_y=False,
+                         fix_invalid=True, min_vertices=3, min_area=0.0):
+    polys = []
+    skipped = []
 
-# build one MultiPolygon
-boundaries_mpoly = MultiPolygon(polys)
+    for i, raw in enumerate(contours):
+        arr = np.asarray(raw)
 
-type(boundaries_mpoly)
+        # unify to a list of 2D arrays, each (N, 2)
+        parts = []
+
+        if arr.ndim == 2 and arr.shape[1] == 2:
+            parts = [arr]
+        elif arr.ndim == 3:
+            # shapes like (M, N, 2) or (M, N, 1, 2) flattened by caller
+            for p in arr:
+                p = np.asarray(p)
+                if p.ndim == 2 and p.shape[1] == 2:
+                    parts.append(p)
+                elif p.ndim == 3 and p.shape[-2] == 1 and p.shape[-1] == 2:
+                    parts.append(p[:, 0, :])
+        elif arr.ndim == 4 and arr.shape[-2] == 1 and arr.shape[-1] == 2:
+            # shapes like (M, N, 1, 2)
+            for p in arr:
+                parts.append(p[:, 0, :])
+
+        if not parts:
+            skipped.append((i, "no usable part"))
+            continue
+
+        for p in parts:
+            if p.shape[0] < min_vertices:
+                skipped.append((i, "too few vertices"))
+                continue
+
+            # row, col -> x, y
+            row = p[:, 0]
+            col = p[:, 1]
+
+            if flip_y and height is not None:
+                y = height - row
+            else:
+                y = row
+
+            xy = np.column_stack([col, y])
+
+            poly = Polygon(xy)
+
+            if not poly.is_valid and fix_invalid:
+                poly = poly.buffer(0)
+
+            if not poly.is_valid:
+                skipped.append((i, "invalid"))
+                continue
+
+            if poly.area < min_area:
+                skipped.append((i, "too small"))
+                continue
+
+            polys.append(poly)
+
+    return polys, skipped
+```
+
+```{python}
+height = res["shape"][0]
+
+polys_tum, skipped_tum = contours_to_polygons(
+    res["CTum"].contours,
+    height=height,
+    flip_y=False,      # or True if you need flip
+    fix_invalid=True,
+    min_vertices=3,
+    min_area=0.0
+)
+
+mpoly_tum = polys_tum
+
+print("total contours:", len(res["CTum"].contours))
+print("polygons kept:", len(polys_tum))
+print("skipped (first 10):", skipped_tum[:10])
+```
+
+```{python}
+boundaries_mpoly = mpoly_tum
 ```
 
 
 ```{r}
-library("shapely")
+library(sf)
 
-p0 <- py$boundaries_mpoly 
-print(p0)
+# extract WKT from each Python geometry
+wkt_vec <- vapply(py$boundaries_mpoly, function(g) g$wkt, character(1))
 
+# create sfc
+sfc_grid <- st_as_sfc(wkt_vec, crs = NA)
 
-p0_poly <- st_as_sfc(p0$wkt) |> st_as_sf()
+# optional. convert to sf
+sf_grid <- st_as_sf(data.frame(id = seq_along(sfc_grid)),
+                     geometry = sfc_grid)
 
-plot(p0_poly)
+plot(sf_grid)
 ```
+
+
 ```{r}
-sf_cellchart <- sf_to_binary_matrix(p0_poly, 0, 256, 0, 256, 256, 256) |>
-  rotate_90_cw()
-
-plot(p0_poly)
-
-jaccard_binary(sf_cellchart, tissueImage)
-
+res_gridgene_b <- sf_to_binary_matrix(sf_grid, 0, 256, 0, 256, 256, 256) |>
+     rotate_90_cw()
+jaccard_binary(res_gridgene_b, tissueImage)
 ```
+
+
+
+
 
