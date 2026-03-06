@@ -1066,6 +1066,7 @@ sim_grid <- sim_grid |>
 
 
 ```{r}
+#| eval: false
 # run all simulations
 all_sims <- sim_grid |>
   mutate(
@@ -1090,7 +1091,13 @@ all_sims <- sim_grid |>
 ```
 
 ```{r}
+#| eval: false
 saveRDS(all_sims, "../outs/eval-260304-1.rds")
+```
+
+```{r}
+#| include: false
+all_sims <- readRDS("../outs/eval-260304-1.rds")
 ```
 
 # Evaluation
@@ -1220,85 +1227,85 @@ summary(m2)
 ```
 
 
-```{r}
-df_plot |>
-  filter(method == "sosta") |>
-  filter(jaccard_new < 0.48)
-```
+<!-- ```{r} -->
+<!-- df_plot |> -->
+<!--   filter(method == "sosta") |> -->
+<!--   filter(jaccard_new < 0.48) -->
+<!-- ``` -->
 
 
-```{r}
-r <- df_plot |>
-  filter(method == "sosta") |>
-  filter(jaccard_new < 0.48) |>
-  pull(res)
-```
+<!-- ```{r} -->
+<!-- r <- df_plot |> -->
+<!--   filter(method == "sosta") |> -->
+<!--   filter(jaccard_new < 0.48) |> -->
+<!--   pull(res) -->
+<!-- ``` -->
 
 
-```{r}
-r[[1]][["poly_true"]] |> plot()
-```
-```{r}
-r[[1]][["df1"]] |>
-    as.data.frame() |>
-    ggplot(aes(x = x, y = y, color = marks)) +
-    geom_point(size = 1.5, stroke = 0) +
-    coord_equal() +
-    scale_color_manual(values = pals::okabe(4)[-1]) +
-    geom_sf(data = r[[1]][["poly_true"]], inherit.aes = FALSE, fill = NA,
-            linewidth = 0.5, color = "darkblue")
-```
-```{r}
-shapeIntensityImage(r[[1]][["tstSPE"]], marks = "marks", markSelect = "A")
-```
+<!-- ```{r} -->
+<!-- r[[1]][["poly_true"]] |> plot() -->
+<!-- ``` -->
+<!-- ```{r} -->
+<!-- r[[1]][["df1"]] |> -->
+<!--     as.data.frame() |> -->
+<!--     ggplot(aes(x = x, y = y, color = marks)) + -->
+<!--     geom_point(size = 1.5, stroke = 0) + -->
+<!--     coord_equal() + -->
+<!--     scale_color_manual(values = pals::okabe(4)[-1]) + -->
+<!--     geom_sf(data = r[[1]][["poly_true"]], inherit.aes = FALSE, fill = NA, -->
+<!--             linewidth = 0.5, color = "darkblue") -->
+<!-- ``` -->
+<!-- ```{r} -->
+<!-- shapeIntensityImage(r[[1]][["tstSPE"]], marks = "marks", markSelect = "A") -->
+<!-- ``` -->
 
-```{r}
-ppp <- SPE2ppp(r[[1]][["tstSPE"]], marks = "marks")
-ppSel <- spatstat.geom::subset.ppp(ppp, marks %in% "A")
+<!-- ```{r} -->
+<!-- ppp <- SPE2ppp(r[[1]][["tstSPE"]], marks = "marks") -->
+<!-- ppSel <- spatstat.geom::subset.ppp(ppp, marks %in% "A") -->
 
-(thrs <- findIntensityThreshold(ppp, markSelect = "A", dim = 250))
-```
+<!-- (thrs <- findIntensityThreshold(ppp, markSelect = "A", dim = 250)) -->
+<!-- ``` -->
 
-```{r}
-res_sosta_sf <- reconstructShapeDensityImage(
-  r[[1]][["tstSPE"]],
-  marks = "marks",
-  markSelect = "A",
-  imageId = "image1",
-  imageCol = "imageName",
-  thres =  thrs
-)
-```
+<!-- ```{r} -->
+<!-- res_sosta_sf <- reconstructShapeDensityImage( -->
+<!--   r[[1]][["tstSPE"]], -->
+<!--   marks = "marks", -->
+<!--   markSelect = "A", -->
+<!--   imageId = "image1", -->
+<!--   imageCol = "imageName", -->
+<!--   thres =  thrs -->
+<!-- ) -->
+<!-- ``` -->
 
 
-```{r}
-r[[1]][["df1"]] |>
-    as.data.frame() |>
-    ggplot(aes(x = x, y = y, color = marks)) +
-    geom_point(size = 1.5, stroke = 0) +
-    coord_equal() +
-    scale_color_manual(values = pals::okabe(4)[-1]) +
-    geom_sf(data = r[[1]][["poly_true"]], inherit.aes = FALSE,
-            fill = NA, linewidth = 0.5, color = "darkblue") +
-    geom_sf(data = res_sosta_sf, inherit.aes = FALSE, fill = NA, linewidth = 0.5, color = "red3")
-```
+<!-- ```{r} -->
+<!-- r[[1]][["df1"]] |> -->
+<!--     as.data.frame() |> -->
+<!--     ggplot(aes(x = x, y = y, color = marks)) + -->
+<!--     geom_point(size = 1.5, stroke = 0) + -->
+<!--     coord_equal() + -->
+<!--     scale_color_manual(values = pals::okabe(4)[-1]) + -->
+<!--     geom_sf(data = r[[1]][["poly_true"]], inherit.aes = FALSE, -->
+<!--             fill = NA, linewidth = 0.5, color = "darkblue") + -->
+<!--     geom_sf(data = res_sosta_sf, inherit.aes = FALSE, fill = NA, linewidth = 0.5, color = "red3") -->
+<!-- ``` -->
 
-```{r}
-sf_to_mask <- function(sf_obj) {
-  if (nrow(sf_obj) == 0L) {
-    return(matrix(0L, nrow = side, ncol = side))
-  }
-  mat <- sf_to_binary_matrix(sf_obj, 0, side, 0, side, side, side) |>
-    rotate_90_cw()
-  return(mat)
-}
-```
+<!-- ```{r} -->
+<!-- sf_to_mask <- function(sf_obj) { -->
+<!--   if (nrow(sf_obj) == 0L) { -->
+<!--     return(matrix(0L, nrow = side, ncol = side)) -->
+<!--   } -->
+<!--   mat <- sf_to_binary_matrix(sf_obj, 0, side, 0, side, side, side) |> -->
+<!--     rotate_90_cw() -->
+<!--   return(mat) -->
+<!-- } -->
+<!-- ``` -->
 
-```{r}
-side <- 256
-mask_sosta <- sf_to_mask(res_sosta_sf)
-jaccard_binary(mask_sosta, r[[1]][["tissueImage"]])
-```
+<!-- ```{r} -->
+<!-- side <- 256 -->
+<!-- mask_sosta <- sf_to_mask(res_sosta_sf) -->
+<!-- jaccard_binary(mask_sosta, r[[1]][["tissueImage"]]) -->
+<!-- ``` -->
 
 
 <!-- ```{r} -->
