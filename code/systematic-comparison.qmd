@@ -1188,7 +1188,7 @@ df_plot <- df_plot |>
 
 ```{r}
 # plot, GRIDGENE_best vs GRIDGENE_all clearly separated
-df_plot |>
+p1 <- df_plot |>
   unique() |>
   ggplot(aes(x = method, y = jaccard_new)) +
   geom_violin(aes(fill = method), alpha = 0.7, trim = FALSE, show.legend = FALSE) +
@@ -1197,6 +1197,8 @@ df_plot |>
   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust = 0.5)) +
   geom_boxplot(width = 0.075) +
   labs(x = "", y = "Jaccard index", fill = "") 
+
+p1
 ```
 ```{r}
 df_plot |>
@@ -1225,6 +1227,76 @@ df_tst_2 <- df_plot |>
 m2 <- lm(jaccard_new ~ method, data = df_tst_2)
 summary(m2)  
 ```
+
+```{r}
+r <- df_plot |>
+  filter(lambda_A == 0.04 & noise_A == 0.01) |>
+  pull(res)
+```
+
+
+```{r}
+r[[42]][["poly_true"]] |> plot()
+```
+
+```{r}
+p00 <- r[[42]][["df1"]] |>
+    as.data.frame() |>
+    ggplot(aes(x = x, y = y, color = marks)) +
+    #geom_point(size = 1.5, stroke = 0) +
+    coord_equal() +
+    scale_color_manual(values = pals::okabe(4)[-1]) +
+    geom_sf(data = r[[42]][["poly_true"]], inherit.aes = FALSE, fill = "gray85",
+            linewidth = 0.5, color = "darkblue") 
+```
+
+
+```{r}
+p01 <- r[[42]][["df1"]] |>
+    as.data.frame() |>
+    ggplot(aes(x = x, y = y, color = marks)) +
+    geom_point(size = 1, stroke = 0) +
+    coord_equal() +
+    scale_color_manual(values = pals::okabe(4)[-1]) +
+    geom_sf(data = r[[42]][["poly_true"]], inherit.aes = FALSE, fill = NA,
+            linewidth = 0.5, color = "darkblue") + 
+  guides(colour = guide_legend(override.aes = list(size=3)))
+
+p01
+```
+
+```{r}
+shapeIntensityImage(r[[42]][["tstSPE"]], marks = "marks", markSelect = "A")
+```
+
+```{r}
+library("gt")
+
+sim_grid_mets <- data.frame(
+  "sim_id" = "1,2,3,4",
+  "n_blobs" = "30, 55, 82",
+  "blob_sd" = "8, 15",
+  "lambda_A" = "0.03, 0.04, 0.05, 0.07",
+  "noise_A" = "0.001, 0.005, 0.01, 0.02",
+  "total_combs" = "312",
+  "GRIDGENE_grid" = "180"
+) |> pivot_longer(everything(), names_to = "parameter", values_to = "values")
+
+p02 <- sim_grid_mets |> gt()
+```
+
+```{r}
+#| fig-width: 10
+#| figh-heigt: 8
+library("patchwork")
+
+(p00 | p01 | p02) / p1 +
+  plot_annotation(tag_levels = 'a')  &
+    theme(plot.tag = element_text(face = 'bold'))
+
+ggsave("../outs/methods_comparison.pdf", width = 11, height = 7)
+```
+
 
 
 <!-- ```{r} -->
