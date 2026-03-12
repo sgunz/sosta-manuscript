@@ -32,9 +32,9 @@
     "Version": "3.21"
   },
   "Python": {
-    "Version": "3.10.12",
+    "Version": "3.12.10",
     "Type": "virtualenv",
-    "Name": "./renv/python/virtualenvs/renv-python-3.10"
+    "Name": "./renv/python/virtualenvs/renv-python-3.12"
   },
   "Packages": {
     "AnnotationDbi": {
