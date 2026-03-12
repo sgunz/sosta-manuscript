@@ -252,7 +252,7 @@ identify_bordering_cells_poly <- function(spe_object, reference_cell,
         }
     # save the number of clusters identified
     attr(spe_object, "n_of_clusters") <- length(ahull_polygon)
-    return(c(spe = spe_object, ahull = resahull))
+    return(list(spe = spe_object, ahull = resahull))
 }
 
 # from: https://github.com/TrigosTeam/SPIAT/blob/d5dedad7fe4ae645940f3c80e6343347360b1618/R/utils.R#L65
@@ -453,6 +453,8 @@ from gridgene import get_arrays as ga
 from gridgene import contours as gg_contours
 from gridgene import get_masks as gg_masks
 
+from shapely.geometry import Polygon, MultiPolygon
+import numpy as np
 
 def _plot_contour(ax, contour):
     # shapely polygon
@@ -579,36 +581,6 @@ def gridgene_segment_marks(
         "df_tum": df_tum,
     }
     
-from shapely.geometry import Polygon, MultiPolygon
-import numpy as np
-
-def contours_to_multipolygon(contours):
-    polys = []
-
-    for c in contours:
-        c = np.asarray(c)
-
-        # reshape if (N,1,2)
-        if c.ndim == 3 and c.shape[-2] == 1 and c.shape[-1] == 2:
-            c = c[:, 0, :]
-
-        if c.ndim != 2 or c.shape[1] != 2:
-            continue
-
-        # convert (row, col) -> (x=col, y=row)
-        height = res["shape"][0]
-        xy = np.column_stack([c[:,1], height - c[:,0]])
-
-        if len(xy) >= 3:
-            poly = Polygon(xy)
-            if poly.is_valid:
-                polys.append(poly)
-
-    return MultiPolygon(polys)
-
-from shapely.geometry import Polygon, MultiPolygon
-import numpy as np
-
 def contours_to_polygons(contours, height=None, flip_y=False,
                          fix_invalid=True, min_vertices=3, min_area=0.0):
     polys = []
@@ -756,29 +728,35 @@ def table_to_adata(df: pd.DataFrame) -> ad.AnnData:
 import numpy as np
 
 def cellcharter_boundaries_to_wkt(df, library_id="image1", mark_tum="A"):
-    """Return WKT polygons for CellCharter boundaries."""
-    # df -> AnnData as in your existing code
-    adata = table_to_adata(df)
-    
+    d = df[df["imageName"] == library_id].copy()
+    adata = table_to_adata(d)
+
+    adata = adata[adata.obs["marks"] == mark_tum].copy()
+
+    if adata.n_obs == 0:
+        return []
+
     sq.gr.spatial_neighbors(
         adata,
-        library_key='imageName',
-        coord_type='generic',
+        library_key="imageName",
+        coord_type="generic",
         delaunay=True
     )
-    
-    cc.gr.connected_components(adata, cluster_key='marks')
+
+    cc.gr.connected_components(adata, cluster_key="marks")
     cc.tl.boundaries(adata, min_hole_area_ratio=0.01)
-    
+
     boundaries = adata.uns["shape_component"]["boundary"]
-    
+
     wkt_list = []
-    
-    for comp_id, poly in boundaries.items():
-        # keep only polygons for tumour mark if you need filtering
-        if hasattr(poly, "geom_type") and poly.geom_type in ("Polygon", "MultiPolygon"):
-            wkt_list.append(poly.wkt)
-    
+    for _, poly in boundaries.items():
+        if hasattr(poly, "geom_type"):
+            if poly.geom_type == "Polygon":
+                wkt_list.append(poly.wkt)
+            elif poly.geom_type == "MultiPolygon":
+                for g in poly.geoms:
+                    wkt_list.append(g.wkt)
+
     return wkt_list
 ```
 
@@ -868,7 +846,7 @@ run_single_simulation <- function(
     tstSPE,
     marks = "marks",
     markSelect = mark_tum,
-    imageId = "image1",
+    imageId = library_id,
     imageCol = "imageName"
   )
   mask_sosta <- sf_to_mask(res_sosta_sf)
@@ -888,7 +866,7 @@ run_single_simulation <- function(
   tstSPE_icr <- patchDetection(
     tstSPE_icr,
     coords = c("x", "y"),
-    patch_cells = tstSPE$marks == mark_tum,
+    patch_cells = tstSPE_icr$marks == mark_tum,
     colPairName = "expansion_interaction_graph",
     expand_by = 5,
     img_id = "imageName"
@@ -901,7 +879,6 @@ run_single_simulation <- function(
   
   res_imcr_sf <- st_as_sfc(p_icr$polygon) |>
     st_as_sf()
-  
   mask_imcr <- sf_to_mask(res_imcr_sf)
   jac_imcr <- jaccard_binary(mask_imcr, true_mat)
   
@@ -917,7 +894,7 @@ run_single_simulation <- function(
     plot_final_border = FALSE
   )
   
-  spiat_poly <- ashape_to_polygon(res_spiat$ahull.ashape.obj)
+  spiat_poly <- ashape_to_polygon(res_spiat$ahull$ashape.obj)
   mask_spiat <- sf_to_mask(spiat_poly)
   jac_spiat <- jaccard_binary(mask_spiat, true_mat)
   
@@ -1033,6 +1010,12 @@ run_single_simulation <- function(
 ```
 
 
+```{r}
+run_single_simulation()
+```
+
+
+
 # Run sims
 
 ```{r}
@@ -1056,7 +1039,9 @@ sim_grid <- tidyr::crossing(
   blob_sd = c(8L, 15L),
   lambda_A = c(0.03, 0.04, 0.05, 0.07),
   noise_A = c(0.001, 0.005, 0.01, 0.02)
-)
+) |>
+  mutate(sim_id = row_number(),
+         seed = 100 + sim_id)
 
 # filter some low intensity high noise scenarios
 sim_grid <- sim_grid |> 
@@ -1069,6 +1054,7 @@ sim_grid <- sim_grid |>
 #| eval: false
 # run all simulations
 all_sims <- sim_grid |>
+  filter(sim_id < 10) |> 
   mutate(
     res = purrr::pmap(
       list(sim_id, n_blobs, blob_sd, lambda_A, noise_A),
@@ -1092,12 +1078,13 @@ all_sims <- sim_grid |>
 
 ```{r}
 #| eval: false
-saveRDS(all_sims, "../outs/eval-260304-1.rds")
+saveRDS(all_sims, "../outs/eval-260311-1.rds")
 ```
 
 ```{r}
 #| include: false
-all_sims <- readRDS("../outs/eval-260304-1.rds")
+#| eval: false
+#all_sims <- readRDS("../outs/eval-260304-1.rds")
 ```
 
 # Evaluation

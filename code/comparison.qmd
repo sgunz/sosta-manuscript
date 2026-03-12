@@ -46,7 +46,7 @@ plot(poly)
 ```
 
 ```{r}
-pointPattern1 <- createPointPatternTissue(tissueImage, 0.1, 0.1, 0.005, 0.005)
+pointPattern1 <- createPointPatternTissue(tissueImage, 0.1, 0.1, 0.005, 0.005, 0.005)
 ```
 
 ```{r}
@@ -555,8 +555,10 @@ plt.show()
 ```
 
 ```{python}
-cc.gr.connected_components(adata, cluster_key='marks')
-cc.tl.boundaries(adata, min_hole_area_ratio=0.01)
+adata_A = adata[adata.obs["marks"] == "A"].copy()
+
+cc.gr.connected_components(adata_A, cluster_key='marks')
+cc.tl.boundaries(adata_A, min_hole_area_ratio=0.01)
 ```
 
 ```{python}
@@ -564,11 +566,11 @@ cc.tl.boundaries(adata, min_hole_area_ratio=0.01)
 import matplotlib.pyplot as plt
 import numpy as np
 
-boundaries = adata.uns["shape_component"]["boundary"]
-coords = adata.obsm["spatial"]
+boundaries = adata_A.uns["shape_component"]["boundary"]
+coords = adata_A.obsm["spatial"]
 
 # categorical marks
-marks = adata.obs["marks"].astype("category")
+marks = adata_A.obs["marks"].astype("category")
 codes = marks.cat.codes
 categories = marks.cat.categories
 
