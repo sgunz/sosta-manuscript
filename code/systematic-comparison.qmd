@@ -1011,7 +1011,9 @@ run_single_simulation <- function(
 
 
 ```{r}
-run_single_simulation()
+sim1 <- run_single_simulation()
+sim1$jaccard_table
+
 ```
 
 
@@ -1027,9 +1029,9 @@ library("purrr")
 
 # define GRIDGENE parameter grid
 gridgene_param_grid <- tidyr::crossing(
-  kernel_size = c(1L, 20L, 40L, 60L, 80L, 100L),
+  kernel_size = c(20L, 40L, 60L, 80L, 100L),
   density_th = c(1L, 10L, 15L, 20L, 50L, 75L),
-  min_area = c(1L, 20L, 50L, 100L, 200L)
+  min_area = c(20L, 50L, 100L, 200L)
 )
 
 # define simulation scenarios
@@ -1054,7 +1056,7 @@ sim_grid <- sim_grid |>
 #| eval: false
 # run all simulations
 all_sims <- sim_grid |>
-  filter(sim_id < 10) |> 
+  # filter(sim_id < 10) |> # for testing
   mutate(
     res = purrr::pmap(
       list(sim_id, n_blobs, blob_sd, lambda_A, noise_A),
@@ -1077,14 +1079,14 @@ all_sims <- sim_grid |>
 ```
 
 ```{r}
-#| eval: false
-saveRDS(all_sims, "../outs/eval-260311-1.rds")
+#| eval: true
+saveRDS(all_sims, "../outs/eval-260313.rds")
 ```
 
 ```{r}
 #| include: false
 #| eval: false
-#all_sims <- readRDS("../outs/eval-260304-1.rds")
+all_sims <- readRDS("../outs/eval-260313.rds")
 ```
 
 # Evaluation
