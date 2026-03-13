@@ -1044,7 +1044,11 @@ sim_grid <- tidyr::crossing(
 ) |>
   mutate(sim_id = row_number(),
          seed = 100 + sim_id)
+```
 
+```{r}
+#| eval: false
+#| include: false
 # filter some low intensity high noise scenarios
 sim_grid <- sim_grid |> 
   filter(!(lambda_A == 0.03 & (noise_A == 0.02 | noise_A == 0.01))) |> 
@@ -1080,13 +1084,13 @@ all_sims <- sim_grid |>
 
 ```{r}
 #| eval: true
-saveRDS(all_sims, "../outs/eval-260313.rds")
+saveRDS(all_sims, "../outs/eval-260314.rds")
 ```
 
 ```{r}
 #| include: false
 #| eval: false
-all_sims <- readRDS("../outs/eval-260313.rds")
+all_sims <- readRDS("../outs/eval-260314.rds")
 ```
 
 # Evaluation
@@ -1223,10 +1227,6 @@ r <- df_plot |>
   pull(res)
 ```
 
-
-```{r}
-r[[42]][["poly_true"]] |> plot()
-```
 
 ```{r}
 p00 <- r[[42]][["df1"]] |>
