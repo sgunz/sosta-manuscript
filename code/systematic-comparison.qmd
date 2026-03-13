@@ -1053,7 +1053,7 @@ sim_grid <- sim_grid |>
 
 
 ```{r}
-#| eval: false
+#| eval: true
 # run all simulations
 all_sims <- sim_grid |>
   # filter(sim_id < 10) |> # for testing
