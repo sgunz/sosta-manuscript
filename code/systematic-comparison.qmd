@@ -856,16 +856,15 @@ run_single_simulation <- function(
     tstSPE,
     coords = c("x", "y"),
     img_id = "imageName",
-    type = "expansion",
-    threshold = 10
+    type = "knn",
+    k = 10
   )
   
   tstSPE_icr <- patchDetection(
     tstSPE_icr,
     coords = c("x", "y"),
     patch_cells = tstSPE_icr$marks == mark_tum,
-    colPairName = "expansion_interaction_graph",
-    expand_by = 5,
+    colPairName = "knn_interaction_graph",
     img_id = "imageName"
   )
   
@@ -880,7 +879,7 @@ run_single_simulation <- function(
   jac_imcr <- jaccard_binary(mask_imcr, true_mat)
   
   ## ------------------------
-  ## SPIAT (uses your helper functions)
+  ## SPIAT (uses helper functions)
   ## ------------------------
   colnames(spatialCoords(tstSPE)) <- c("Cell.X.Position", "Cell.Y.Position")
   
@@ -1013,7 +1012,6 @@ sim1$jaccard_table
 ```
 
 
-
 # Run sims
 
 ```{r}
@@ -1080,13 +1078,13 @@ all_sims <- sim_grid |>
 
 ```{r}
 #| eval: true
-saveRDS(all_sims, "../outs/eval-260318.rds")
+saveRDS(all_sims, "../outs/eval-260318-1.rds")
 ```
 
 ```{r}
 #| include: false
 #| eval: false
-all_sims <- readRDS("../outs/eval-260318.rds")
+all_sims <- readRDS("../outs/eval-260318-1.rds")
 ```
 
 # Evaluation
