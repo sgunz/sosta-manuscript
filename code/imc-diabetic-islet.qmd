@@ -426,8 +426,8 @@ allIslets <- left_join(allIslets, resComb, by = "borderID")
 
 
 ```{r}
-saveRDS(allIslets, "../../data/allIslets.rds" )
-saveRDS(spe, "../../data/spe_islets_sosta.rds" )
+saveRDS(allIslets, "../data/allIslets.rds" )
+saveRDS(spe, "../data/spe_islets_sosta.rds" )
 ```
 
 
