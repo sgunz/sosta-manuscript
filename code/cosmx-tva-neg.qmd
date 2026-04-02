@@ -1011,6 +1011,34 @@ qsub <- q1 + q2 + q3
 ggsave("../misc/qsub.pdf", plot = qsub, width = 12, height = 4)
 ```
 
+
+```{r}
+design <- "AAABB
+           AAABB
+           AAABB"
+
+qsub_new <- q1 + q2 +
+  plot_layout(design = design)
+qsub_new
+ggsave("../misc/qsub_2.1.pdf", plot = qsub_new, width = 8, height = 4)
+```
+
+```{r}
+polsel |>
+      dplyr::filter(cryptBorder %in% "border_foo_1333") |>
+      ggplot() +
+      geom_sf(aes(fill = lv2), show.legend = TRUE) +
+      scale_fill_manual(values = lv2ColsSel,
+                        drop = FALSE) +
+      guides(colour = guide_legend(override.aes = list(size = 4))) +
+      labs(fill = "cell type") +
+      theme_void() -> q22.3
+q22.3
+
+ggsave("../misc/crypt.pdf", plot = q22.2, width = 4.5, height = 4)
+```
+
+
 ```{r}
 qsub_new <- q1 + q2 + q22.2
 qsub_new
