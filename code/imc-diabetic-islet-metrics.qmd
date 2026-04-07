@@ -249,7 +249,7 @@ allIslets |>
 We first inspect two metrics: i) fraction of beta cells within each islet; and, ii) the log10 transformed area of the islets.
 
 ```{r}
-allIslets |> 
+p0 <- allIslets |> 
   sf::st_drop_geometry() |> 
   mutate(log10Area = log10(Area)) |> 
   mutate("Beta cells (%)" = prop_beta) |> 
@@ -266,6 +266,8 @@ allIslets |>
   theme_bw() + 
   scale_fill_manual(values = unname(pals::tol(n = 3))) +
   labs(y = "Metric", x = "Patient ID")
+
+p0
 ```
 
 As we can see, there is variation at the patient and condition level.
@@ -618,17 +620,24 @@ simulationResults <- readRDS("../outs/imc-islets/simResLM.rds")
 ```{r}
 #| fig-width: 15
 #| fig-height: 10
-round(simulationResults, 2) |> 
-    pivot_longer(cols = starts_with("lm"),
-                names_to = "model",
-                values_to = "type1error") |> 
-    ggplot() +
-    geom_point(aes(x = iccN3, y = type1error, color = model) ) +
-    geom_line(aes(x = iccN3, y = type1error, color = model) ) +
-    geom_hline(yintercept = 0.05, linetype = "dotted") +
-    facet_grid(iccN1 ~ iccN2) +
-    scale_color_manual(values = c("navy", "red3")) +
-    theme_light()
+p3 <- round(simulationResults, 2) |>
+  pivot_longer(cols = starts_with("lm"),
+               names_to = "model",
+               values_to = "type1error") |>
+  mutate(model_new = ifelse(model == "lmType1Error", "lm", "lme")) |> 
+  ggplot() +
+  geom_point(aes(x = iccN3, y = type1error, color = model_new)) +
+  geom_line(aes(x = iccN3, y = type1error, color = model_new)) +
+  geom_hline(yintercept = 0.05, linetype = "dotted") +
+  facet_grid(iccN1 ~ iccN2) +
+  scale_color_manual(values = c("navy", "red3")) +
+  theme_light() +
+  theme(axis.text.x = element_text(
+    angle = 90, vjust = 0.5, hjust = 1),
+    legend.position="bottom") +
+  labs(color = "")
+
+p3
 ```
 
 This plot should be interpreted as follows: the facets on the x axis correspond to ICC of group one, the facets on the y axis of group two and the actual x axis for group three.
@@ -638,6 +647,75 @@ Overall, we can see that already if the ICC of one group increases, the FDR (y-a
 # Conclusion
 
 Given our simulations, we conclude that linear mixed effects models can account well for correlation at different levels, if correctly specified. 
+
+# Figures
+
+```{r}
+p1 <- data.frame(lm = resArea$pLmNull[, 1],
+           lme = resArea$pLmeNull[, 1]) |> 
+  pivot_longer(cols = everything()) |> 
+  ggplot(aes(x = value, fill = name)) +
+  geom_histogram(
+    aes(y=after_stat(count/sum(count))),
+                 binwidth = 0.1, alpha = 0.8) +
+  facet_wrap(~ name) +
+  scale_fill_manual(values = c("navy", "red3")) +
+  geom_vline(xintercept = 0.05, linetype = "dashed") +
+  geom_hline(yintercept = 0.05, linetype = "dotted", color = "gray40") +
+  theme_light() +
+  labs(title = "Area", fill = "",
+       x = "p-value", y = "") +
+  ylim(0, 0.1) +
+  scale_y_continuous(labels = scales::percent, limit = c(0,0.11))
+
+
+p2 <- data.frame(lm = resBeta$pLmNull[, 1],
+           lme = resBeta$pLmeNull[, 1]) |> 
+  pivot_longer(cols = everything()) |> 
+  ggplot(aes(x = value, fill = name)) +
+  geom_histogram(
+    aes(y=after_stat(count/sum(count))),
+                 binwidth = 0.1, alpha = 0.8) +
+  facet_wrap(~ name) +
+  scale_fill_manual(values = c("navy", "red3")) +
+  geom_vline(xintercept = 0.05, linetype = "dashed") +
+  geom_hline(yintercept = 0.05, linetype = "dotted", color = "gray40") +
+  theme_light() +
+  labs(title = "Beta cells", fill = "",
+       x = "p-value", y = "") +
+  scale_y_continuous(labels = scales::percent, limit = c(0,0.11))
+
+
+
+p11 <- (p1 | p2) +
+  plot_layout(guides = 'collect')
+```
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 12
+
+design <- "AAAA
+           AAAA
+           AAAA
+           BBBB
+           CCCC
+           CCCC
+           CCCC
+           CCCC
+           CCCC"
+
+(pAll <- (p0 / p11 / p3) + 
+  plot_layout(design = design) +
+  plot_annotation(tag_levels = 'a')  &
+    theme(plot.tag = element_text(face = 'bold')))
+
+
+ggsave("../outs/figS3.pdf", plot = pAll, width = 8, height = 10)
+```
+
+
 
 ```{r}
 sessionInfo()

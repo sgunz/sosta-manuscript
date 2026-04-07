@@ -1,0 +1,515 @@
+---
+title: "CosMx CRC dataset - Parameter Analysis"
+author: "Samuel Gunz"
+date:  last-modified
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+output-dir: "../docs/"
+---
+# Setup
+
+```{r}
+#| message: false
+#| echo: false
+library("SpatialExperiment")
+library("sosta")
+library("ggplot2")
+library("tidyr")
+library("dplyr")
+library("sf")
+library("smoothr")
+library("spdep")
+library("ggspavis")
+library("mumosa")
+library("BiocParallel")
+library("scater")
+library("ggrastr")
+bpparam <- MulticoreParam(6)
+
+theme_set(theme_bw())
+```
+
+Read in data
+
+```{r}
+spe <- readRDS("~/data_no_backup/CosMx_TVA/110.rds")
+spe <- toSpatialExperiment(spe, spatialCoordsNames = c("CenterX_global_px", "CenterY_global_px"))
+# for later reconstruction
+spe$foo <- "foo"
+```
+
+Select small window for testing
+```{r}
+idx <- spatialCoords(spe)[,1] < 60000 & 
+  spatialCoords(spe)[,1] > 45000 & 
+  spatialCoords(spe)[,2] < 60000 & 
+  spatialCoords(spe)[,2] > 45000
+```
+
+# Structures per ROIs
+
+```{r}
+params <- estimateReconstructionParametersSPE(
+    spe[,idx],
+    marks = "lv1",
+    imageCol = "foo",
+    markSelect = "epi",
+    plotHist = TRUE,
+    dim = 750
+)
+```
+
+```{r}
+mean(params$thres)
+mean(params$bndw)
+```
+
+# Proportions
+
+```{r}
+propsTyp <- cellTypeProportions(spe[, !is.na(spe$typ)], "structAssignFilt", "typ", nCores = 4)
+```
+
+
+```{r}
+propsTyp %>%
+  filter(if_any(everything(), ~ . < 0.99 & . > 0.01)) -> propsel
+```
+
+
+```{r}
+propsel |> 
+  tibble::rownames_to_column("structAssign") |>
+  left_join(sm, by = "structAssign") |> 
+  arrange(desc(Area))
+```
+
+
+```{r}
+spe$trans <- "no"
+spe$trans[spe$structAssignFilt %in% rownames(propsel)] <- "yes"
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+
+trp <- "RT|RC|TT|TC|T2C"
+
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE) |> 
+  mutate(transCrpyt = case_when(
+    stringr::str_detect(roi, trp) & trans == "yes" ~ "both",
+    stringr::str_detect(roi, trp) ~ "original_annotation",
+    trans == "yes" ~ "sosta_only",
+    TRUE ~ NA_character_)) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = transCrpyt)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() +
+  guides(colour = guide_legend(override.aes = list(size=5))) +
+  scale_color_manual(values = c("darkred", "gold", "navy"))
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = trans)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() +
+  scale_color_manual(values = c("steelblue", "darkred")) +
+  guides(colour = guide_legend(override.aes = list(size=3)))
+```
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(fil == TRUE) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = roi)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() +
+  guides(colour = guide_legend(override.aes = list(size=3)))
+```
+
+# Proportion of cell types
+
+```{r}
+propsLv1 <- cellTypeProportions(spe[, !is.na(spe$typ)], "structAssign", "lv2", nCores = 4)
+```
+
+```{r}
+ncl <- colData(spe) |> 
+  as.data.frame() |> 
+  filter(!is.na(structAssignFilt)) |> 
+  group_by(structAssign) |> 
+  summarise(ncells = n())
+```
+
+
+```{r}
+propsLv1 %>%
+  filter(if_any(everything(), ~ . < 0.99 & . > 0.01)) -> psl
+```
+
+
+```{r}
+psl |> 
+  tibble::rownames_to_column("structAssign") |>
+  left_join(sm, by = "structAssign") |> 
+  arrange(desc(Area)) |> 
+  left_join(ncl, by = "structAssign") -> psl
+```
+
+```{r}
+psl |>
+  mutate(epi.ref = rowSums(across(
+    c(
+      epi.EE,
+      epi.entero,
+      epi.goblet
+    )
+  ))) |>
+  mutate(epi.pat = rowSums(across(
+    c(`epi.goblet-like_REG4`,
+      `epi.entero-like_ACSF2`,
+      `epi.entero-like_EREG`,      
+      `epi.fetal-like_EMP1`,
+      `epi.fetal-like_MMP7`,
+      epi.inflam_REG1A,
+      `epi.paneth-like_DEFA6`,
+      epi.prolif,
+      epi.prolif_H1,
+      epi.prolif_STMN1,
+      epi.prolif_TACC3,
+      `epi.stem-like_CLU`,
+      `epi.stem-like_CLU`
+    )
+  ))) |>
+  mutate(epi.tot = epi.ref + epi.pat) |>
+  mutate(epi.ref.norm = epi.ref / (epi.ref + epi.pat)) |>
+  mutate(epi.pat.norm = epi.pat / (epi.ref + epi.pat)) -> psl
+```
+
+```{r}
+colData(spe) |>
+  as.data.frame() |> 
+  filter(!is.na(roi)) |> 
+  unique() |> 
+  pull(structAssign) -> annot
+
+
+psl |> 
+  filter(structAssign %in% annot) |> 
+  select(epi.ref:epi.pat.norm)
+```
+
+
+```{r}
+psl |> 
+  filter(epi.tot > 0.5 & epi.ref.norm > 0.001  & epi.pat > 0.5 &
+           ncells > 30 & ncells < 1000) |> 
+  pull(structAssign) -> stsel
+```
+
+```{r}
+length(stsel)
+
+colData(spe) |>
+  as.data.frame() |> 
+  filter(structAssign %in% stsel & !is.na(roi)) |> 
+  group_by(roi) |> 
+  summarize(n = n())
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+cbind(spatialCoords(spe), colData(spe)) |>
+  as.data.frame() |> 
+  dplyr::filter(structAssign %in% stsel) |> 
+  ggplot(aes(x = CenterX_global_px, y = CenterY_global_px, color = roi)) +
+  geom_point(size = 0.5, stroke = 0) + 
+  coord_equal() +
+  guides(colour = guide_legend(override.aes = list(size=3)))
+```
+
+# Aggregate across structures
+
+```{r}
+  epi_gen <- list(
+  "epi.EE" = c("PYY", "SST", "CHGA", "CHGB", "NEUROD1", "GCG", "INSL5"),
+  "epi.goblet" = c(
+  "BEST2",
+  "MUC2",
+  "MUC4",
+  "TFF3",
+  "FCGBP",
+  "ZG16",
+  "ATOH1",
+  "KLK1",
+  "CLCA1",
+  "ITLN1"
+  ),
+  "epi.goblet-like_REG4" = c("MUC5AC", "REG4", "GRIP2", "RETNLB", "SYTL1", "PLXND1"),
+  "epi.inflam_REG1A" = c(
+  "SAA1",
+  "OLFM4",
+  "DMBT1",
+  "S100A9",
+  "HLA-DRA",
+  "HLA-DPA1",
+  "CXCL1",
+  "CXCL2",
+  "CXCL3"
+  ),
+  "epi.paneth-like_DEFA6" = c("REG1A", "REG1B", "REG3A", "DEFA5", "DEFA6", "DLL1", "ITLN2"),
+  "epi.entero" = c(
+  "FABP1",
+  "CA1",
+  "CA2",
+  "CA4",
+  "GUCA2A",
+  "MS4A12",
+  "CEACAM7",
+  "SLC26A3"
+  ),
+  "epi.entero-like_ACSF2" = c(
+  "TTLL3",
+  "PIGZ",
+  "CCDC183",
+  "SELENBP1",
+  "ACSF2",
+  "SHROOM1",
+  "EXD3"
+  ),
+  "epi.entero-like_EREG" = c(
+  "EREG",
+  "ANO9",
+  "NCOA7",
+  "TNNC2",
+  "ARID3A",
+  "FITM2",
+  "UCKL1",
+  "SRPX2",
+  "SPAG4",
+  "THBS1",
+  "HBEGF"
+  ),
+  "epi.stem-like_LGR5" = c(
+  "LGR5",
+  "FN1",
+  "STRAP",
+  "CDX2",
+  "TGFBI",
+  "CEL",
+  "SMOC2",
+  "ASCL2",
+  "RNF43",
+  "RGMB"
+  ),
+  "epi.stem-like_CLU" = c("LEFTY1", "CLU", "PTGDR", "CD44", "SAMD5", "KIF13A", "TRPM5"),
+  "epi.fetal-like_MMP7" = c(
+  "NOTUM",
+  "KRT23",
+  "UBD",
+  "FLNA",
+  "FSTL3",
+  "CAVIN1",
+  "BST2",
+  "KLK6",
+  "KLK10",
+  "AKAP12",
+  "TIMP2",
+  "PPL",
+  "S100A4",
+  "SDC4",
+  "MMP7",
+  "LAMA3",
+  "LAMB3",
+  "LAMC2",
+  "PLAUR",
+  "SLC2A1",
+  "TNFAIP2",
+  "RHOF"
+  ),
+  "epi.fetal-like_EMP1" = c(
+  "CXCL8",
+  "MSLN",
+  "DUSP5",
+  "TM4SF1",
+  "EMP1",
+  "MUC17",
+  "ANXA1",
+  "DUOX2",
+  "DUOXA2",
+  "CD55",
+  "ERO1A",
+  "ECM1",
+  "ENO2",
+  "PFKFB3",
+  "EGLN3",
+  "SERPINE2",
+  "ERRFI1",
+  "CTSE",
+  "COL17A1"
+  ),
+  "epi.prolif_TACC3" = c(
+  "MKI67",
+  "TOP2A",
+  "MYO19",
+  "NCAPG2",
+  "IQGAP3",
+  "FANCA",
+  "RAD54L",
+  "TROAP",
+  "TACC3",
+  "STMN1",
+  "SUMO3",
+  "TUBA1B",
+  "TUBB4B",
+  "H2AC4",
+  "H1-3",
+  "H1-5",
+  "H3C7",
+  "H2BC15",
+  "CDK1",
+  "RARRES1"
+  ),
+  "epi.prolif_STMN1" = c(),
+  "epi.prolif_H1" = c(),
+  "epi.prolif" = c()
+  )
+```
+
+
+## Bulk 
+
+```{r}
+out <- aggregateAcrossCells(spe, spe$structAssign,
+                     statistics = "mean",
+                     BPPARAM = bpparam)
+```
+
+```{r}
+aggMet <- t(shapeMetrics) |> 
+  as.data.frame() |> 
+  tibble::rownames_to_column("ids") |> 
+  rename(structArea = Area ) |> 
+  right_join(as.data.frame(colData(out)), by = "ids") |> 
+  tibble::column_to_rownames("ids")
+```
+
+## Prop detectedd
+
+```{r}
+feats <- c("structArea", "Compactness", "Eccentricity", "Circularity",
+                 "Solidity", "Curl", "fibreLength", "fibreWidth")
+
+```
+
+
+```{r}
+geneCors <- computeCorrelations(log1p(counts(out)),
+                    t(as.matrix(aggMet[out$ids, feats])),
+                    BPPARAM = bpparam
+                    )
+```
+
+```{r}
+gene_corrs <- geneCors[!is.na(geneCors$FDR),]
+gene_corrs <- gene_corrs[gene_corrs$FDR < 0.1,]
+gene_corrs <- gene_corrs[order(gene_corrs$rho, decreasing = TRUE),]
+```
+
+```{r}
+sel.correlcation <- gene_corrs[gene_corrs$feature2 %in% c("fibreWidth"),]
+
+sel.correlcation |>
+  as.data.frame() |> 
+  arrange(desc(rho)) |> 
+  filter(feature1 %in% unlist(epi_gen)) |> 
+  filter(FDR < 0.05) |> 
+  head(n = 10)
+  
+sel.correlcation |>
+  as.data.frame() |> 
+  arrange(desc(rho)) |> 
+  #filter(feature1 %in% unlist(epi_gen)) |> 
+  filter(FDR < 0.05) |> 
+  tail(n = 10)
+```
+```{r}
+which(rowSums(counts(out) > 1) / ncol(counts(out)) > 0.025) |> 
+  names() -> filtG
+```
+
+
+```{r}
+#| fig-width: 5
+#| fig-height: 10
+library(ComplexHeatmap)
+  
+geneCors |> 
+  as.data.frame() |> 
+  filter(feature1 %in% unlist(epi_gen)) |> 
+  filter(feature1 %in% filtG) |> 
+  filter(feature2 == "fibreWidth") |> 
+  select(feature1, feature2, rho) |> 
+  pivot_wider(names_from = feature2, values_from = rho) |> 
+  tibble::column_to_rownames("feature1") |> 
+  as.matrix() -> heatmat
+
+
+gene_order <- unlist(epi_gen)
+gene_category <- rep(names(epi_gen), lengths(epi_gen))
+names(gene_category) <- gene_order
+
+ordered_rows <- intersect(gene_order, rownames(heatmat))
+
+category_names <- unique(gene_category[ordered_rows])
+category_colors <- setNames(pals::alphabet2(length(category_names)), category_names)
+  
+ha_row <- rowAnnotation(
+  Category = gene_category[ordered_rows],
+  col = list(Category = category_colors)
+)
+```
+
+
+```{r}
+Heatmap(
+  heatmat,
+  name = "rho",
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_row_names = TRUE,  
+  show_column_names = TRUE,
+  left_annotation = ha_row
+)
+
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 35
+plotCoords(spe,
+          annotate = "PLAUR",
+          in_tissue = NULL,
+          y_reverse = FALSE)
+```
+
+```{r}
+plot(shapeMetrics["fibreWidth", colnames(counts(out))], 
+log1p(counts(out)["MUC2",]))
+```
