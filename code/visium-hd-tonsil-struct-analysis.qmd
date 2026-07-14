@@ -818,6 +818,14 @@ Heatmap(mat_t,
         heatmap_legend_param = list(title = "z-scaled\nmean expr.")) -> r3
 r3
 ```
+```{r}
+res_MICorient |>
+    as.data.frame() |> 
+    tibble::rownames_to_column("gene") |> 
+    write_csv("../outs/resMic.csv")
+```
+
+
 
 ```{r}
 #| fig-width: 12

@@ -71,6 +71,7 @@ library("dplyr")
 library("sf")
 library("MASS")
 library("nlme")
+library("patchwork")
 
 
 set.seed(8048)
@@ -708,7 +709,7 @@ design <- "AAAA
 
 (pAll <- (p0 / p11 / p3) + 
   plot_layout(design = design) +
-  plot_annotation(tag_levels = 'a')  &
+  plot_annotation(tag_levels = 'A')  &
     theme(plot.tag = element_text(face = 'bold')))
 
 
