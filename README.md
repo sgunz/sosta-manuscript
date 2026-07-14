@@ -1,4 +1,4 @@
-# Code repository – "Analysis of anatomical multi-cellular structures from spatial omics data using _sosta_"
+# Code repository – "Analysis of multicellular anatomical structures from spatial omics data using _sosta_"
 
 This repository contains code to reproduce analyses of the _sosta_ preprint. `sosta` is available from [Bioconductor](https://bioconductor.org/packages/sosta/).
 
