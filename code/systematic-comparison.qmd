@@ -1394,10 +1394,10 @@ design <- "AABB
 
 p00 + p01 + p1 + p13 + p12.2 +
     plot_layout(design = design) +
-  plot_annotation(tag_levels = 'a')  &
+  plot_annotation(tag_levels = 'A')  &
     theme(plot.tag = element_text(face = 'bold'))
 
-ggsave("../outs/figS40320.pdf", width = 10, height = 12)
+ggsave("../outs/figS40710.pdf", width = 10, height = 12)
 ```
 
 ```{r}
