@@ -115,7 +115,7 @@ cbind(spatialCoords(spe), colData(spe)) |>
   theme_void() +
   theme(legend.position = "bottom",
         legend.spacing = grid::unit(0.1, "lines"),
-        legend.key.size = grid::unit(0.5, 'lines'))
+        legend.key.size = grid::unit(0.5, 'lines')) -> p0.0
 ggsave("../misc/slide110.pdf", width = 6.25, height = 4)
 ```
 
@@ -204,7 +204,7 @@ resSub |>
     guides(color = "none", fill = "none") +
     scale_color_manual(values = cs1) +
     scale_fill_manual(values = cs1) +
-    theme_void()
+    theme_void() -> p0.1
 
 ggsave("../misc/structs.pdf", width = 3, height = 3)
 ```
@@ -335,7 +335,10 @@ cbind(resSub, t(shapeMetricsSub)) |>
     geom_sf(aes(fill = fibreWidth, color = fibreWidth)) +
   scale_color_viridis_c(option = "A") +
   scale_fill_viridis_c(option = "A") +
-  theme_void()
+  theme_void() +
+  labs(fill = "fibre\nwidth", color = "fibre\nwidth") -> p0
+
+p0
 ggsave("../misc/fibWid.pdf", width = 3, height = 2.25)
 ```
 
@@ -461,24 +464,13 @@ ggsave("../misc/bp-fibW-reg.pdf", plot = p1, width = 3, height = 4)
 ```
 
 
-
 ```{r}
-#| fig-width: 5
-#| fig-height: 5
-df |> 
-  filter(lv1 == "epi") |> 
-  group_by(structAssign) |> 
-  reframe(medianTrj = median(trj), medianFibreWitdh = median(fibreWidth), typ = typ) |> 
-  ggplot(aes(x = medianFibreWitdh, y = medianTrj, color = typ)) +
-    ggrastr::rasterise(geom_point(size = 1, stroke = 0), dpi = 300)  +
-  labs(color = "") +
-  scale_color_manual(values = typCols) +
-  labs(x = "median fibre width", y = "median trajectory") +
-  geom_smooth(method = "lm", color = "black")  +
-  guides(color=guide_legend(override.aes=list(size = 4))) -> p3
+figs <- list(p0, p0.0, p0.1, p1, p2, p3)
+figs
 
-p3
+saveRDS(figs, "../misc/subplts/subplotspp.rds")
 ```
+
 
 Collect for figure
 

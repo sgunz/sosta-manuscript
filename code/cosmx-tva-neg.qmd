@@ -185,7 +185,8 @@ resSub |>
   geom_sf(aes(fill = shape, color = shape)) +
   scale_color_gradientn(colors = pals::parula()) +
   scale_fill_gradientn(colors = pals::parula()) +
-  theme_void() -> q1
+  theme_void() +
+  labs(fill = "shape\nindex", color = "shape\nindex") -> q1
 
 q1
 
@@ -1044,6 +1045,15 @@ qsub_new <- q1 + q2 + q22.2
 qsub_new
 ggsave("../misc/qsub_2.pdf", plot = qsub_new, width = 12, height = 4)
 ```
+
+```{r}
+plt2 <- list(q1, q2, q22.2)
+plt2
+
+saveRDS(plt2, "../misc/subplts/subplotspp2.rds")
+```
+
+
 
 
 ```{r}

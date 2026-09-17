@@ -838,6 +838,13 @@ ggsave("../misc/rsub.pdf", plot = rsub, width = 8, height = 3.5)
 ```
 
 
+```{r}
+plt3 <- list(r1, r2, r3)
+
+saveRDS(plt3, "../misc/subplts/subplotspp3.rds")
+```
+
+
 # Session Info
 
 ```{r}
