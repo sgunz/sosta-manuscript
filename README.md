@@ -8,7 +8,11 @@ R and Python packages are managed using `renv`. To install necessary R packages 
 ## Data
 All datasets used are publicly available. The CosMx TVA dataset is available at https://zenodo.org/records/15574384. The IMC pancreatic islets dataset is accessible through Bioconductor's `ExperimentHub` via the R package `imcdatasets` and alternatively at https://data.mendeley.com/datasets/cydmwsfztj/2. The Visium HD human tonsil data is available from the [10x Genomics Datasets resource](https://www.10xgenomics.com/datasets/visium-hd-cytassist-gene-expression-libraries-human-tonsil-ff-ultima).
 
-# Session Info
+## Citation
+
+Gunz S, Crowell HL, Robinson MD (2026) Analysis of multicellular anatomical structures from spatial omics data using sosta. PLoS Comput Biol 22(9): e1014551. https://doi.org/10.1371/journal.pcbi.1014551
+
+## Session Info
 
 ```
 R version 4.5.1 (2025-06-13)
